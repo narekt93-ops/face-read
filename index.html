@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Face Read</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js"></script>
+<style>
+/* Layout: monitor left (camera/replay, phone link, performance strip), readout rail right (read, layers + circumplex, beat order, action units), take analysis full width. Single dark edit-suite look. */
+:root{
+  --bg:#0b0e14; --panel:#121722; --panel2:#0f131c; --line:#222a38;
+  --fg:#e8e4dc; --muted:#8a90a0; --ember:#ff7a2f; --rec:#ff3b3b;
+  --eyes:#5cc8ff; --brows:#ffb23f; --mouth:#ff5f7e; --head:#a98bff; --hands:#6fdc8c;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--mono);padding-inline:16px;padding-block:16px}
+.wrap{max-width:1320px;margin:0 auto;display:grid;gap:16px;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+header{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{font:700 28px/1 var(--display);margin:0;letter-spacing:-.01em}
+h1 span{color:var(--ember)}
+.sub{color:var(--muted);font-size:12px;margin-top:4px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{font:500 12px var(--mono);letter-spacing:.04em;text-transform:uppercase;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px 12px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--ember)}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
+button.primary{background:var(--ember);color:#160a02;border-color:var(--ember)}
+button.rec{border-color:var(--rec);color:var(--rec)}
+button.rec.on{background:var(--rec);color:#fff}
+kbd{font:500 11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--fg)}
+.keys{font-size:11px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap}
+.left,.rail{display:flex;flex-direction:column;gap:16px;min-width:0}
+.stage{position:relative;background:#000;border:1px solid var(--line);border-radius:8px;overflow:hidden;aspect-ratio:4/3;max-width:100%}
+.stage.recording{border-color:var(--rec);box-shadow:0 0 0 1px var(--rec)}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
+.overlay{position:absolute;inset:0;z-index:3;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted);background:rgba(11,14,20,.9)}
+.overlay strong{display:block;font:700 20px var(--display);color:var(--fg);margin-bottom:6px}
+.progress{height:6px;background:#1a2030;border-radius:3px;overflow:hidden;margin-top:12px}
+.progress i{display:block;height:100%;width:0;background:var(--ember)}
+.tag{position:absolute;z-index:4;left:12px;top:12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px}
+.tag i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--muted);margin-right:6px;vertical-align:1px}
+.tag.live i{background:#3ddc84}.tag.rec i{background:var(--rec);animation:pulse 1s infinite}.tag.play i{background:var(--ember)}
+.src{position:absolute;z-index:4;right:12px;top:12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px;color:var(--muted)}
+@keyframes pulse{50%{opacity:.25}}
+.transport{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.transport input[type=range]{flex:1;min-width:120px;accent-color:var(--ember)}
+.tc{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.strip{height:150px;position:relative}
+.strip.seekable{cursor:pointer}
+.strip canvas{width:100%;height:100%;display:block}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.legend b{display:inline-block;width:10px;height:3px;vertical-align:3px;margin-right:6px}
+.dominant{font:700 34px/1 var(--display);margin:0 0 4px}
+.conf{color:var(--muted);font-size:12px;margin-bottom:12px;min-height:18px}
+.bars{display:grid;gap:7px}
+.bar{display:grid;grid-template-columns:88px minmax(0,1fr) 30px;align-items:center;gap:8px;font-size:12px}
+.bar small{display:block;color:var(--muted);font-size:10px}
+.track{height:8px;background:#1a2030;border-radius:4px;overflow:hidden}
+.fill{height:100%;width:0;background:var(--muted);border-radius:4px}
+.bar.top .fill{background:var(--ember)}
+.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.layers{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:14px;align-items:start}
+@media (max-width:420px){.layers{grid-template-columns:minmax(0,1fr)}}
+.lrows{display:grid;gap:8px;font-size:12px}
+.lrow span{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.lrow b{font-weight:500}
+.lrow.blend b{color:var(--ember)}
+.lrow.hand b{color:var(--hands)}
+.circ{width:150px;height:150px;max-width:100%}
+.circ canvas{width:100%;height:100%;display:block}
+.credit{font-size:10px;color:var(--muted)}
+.beat{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:30px}
+.chip{font-size:12px;padding:4px 8px;border-radius:4px;border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.chip.eyes{border-color:var(--eyes);color:var(--eyes)}.chip.brows{border-color:var(--brows);color:var(--brows)}.chip.mouth{border-color:var(--mouth);color:var(--mouth)}.chip.head{border-color:var(--head);color:var(--head)}.chip.hands{border-color:var(--hands);color:var(--hands)}
+.arrow{color:var(--muted)}
+.together{font-size:11px;color:var(--ember);margin-left:4px}
+.history{margin:10px 0 0;padding:0;list-style:none;display:grid;gap:6px;font-size:12px;color:var(--muted)}
+.history li{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.empty{color:var(--muted);font-size:12px}
+.aus{display:grid;gap:4px}
+.au{display:grid;grid-template-columns:42px minmax(0,1fr) minmax(60px,1fr) 22px;gap:8px;align-items:center;font-size:11px}
+.au .code{font-weight:500}
+.au.brows .code{color:var(--brows)}.au.eyes .code{color:var(--eyes)}.au.mouth .code{color:var(--mouth)}
+.au .name{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.au .track{height:6px}
+.au.brows .fill{background:var(--brows)}.au.eyes .fill{background:var(--eyes)}.au.mouth .fill{background:var(--mouth)}
+.au .lt{text-align:center;font-weight:500}
+.au .side{font-size:9px;color:var(--ember)}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.stats b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+.slider{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+.slider input{accent-color:var(--ember);width:110px}
+.note{font-size:11px;color:var(--muted)}
+.phonebox{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center}
+@media (max-width:520px){.phonebox{grid-template-columns:minmax(0,1fr)}}
+.qr{background:#fff;padding:8px;border-radius:6px;width:180px;height:180px;display:grid;place-items:center}
+.qr svg{width:100%;height:100%}
+.phonebox ol{margin:0;padding-left:18px;font-size:12px;color:var(--muted);display:grid;gap:4px}
+.phonebox input[type=url]{width:100%;min-width:0;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font:12px var(--mono)}
+.status{font-size:12px;margin-top:8px}
+.status.ok{color:#3ddc84}.status.err{color:var(--rec)}
+.analysis{grid-column:1/-1}
+.takes{display:flex;gap:6px;flex-wrap:wrap}
+.takes button.active{border-color:var(--ember);color:var(--ember)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.tabs button[aria-selected=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.opts{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted);margin-bottom:10px}
+.opts label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.opts input{accent-color:var(--ember)}
+textarea{width:100%;min-height:360px;resize:vertical;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:14px;font:13px/1.6 var(--mono)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-top:10px}
+.toast{font-size:12px;color:var(--ember);min-height:16px}
+/* Phone camera mode */
+#phone{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+#phone .pv{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:3/4}
+#phone video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#phone video.back{transform:none}
+#phone .big{font-size:16px;padding:16px;width:100%}
+#phone .prow{display:flex;gap:10px}
+#phone .prow button{flex:1}
+</style>
+</head>
+<body>
+
+<!-- ====================== PHONE CAMERA MODE (opened from the QR code) ====================== -->
+<section id="phone" hidden>
+  <div><h1>Face <span>Read</span></h1><div class="sub">Phone camera · streaming to your laptop</div></div>
+  <div class="pv"><video id="pvid" playsinline muted autoplay></video><div class="tag" id="ptag"><i></i><span>Not connected</span></div></div>
+  <button class="primary big" id="pStart">Start camera &amp; connect</button>
+  <div class="prow"><button id="pFlip" disabled>Flip camera</button><button class="rec big" id="pRec" disabled>● Record</button></div>
+  <div class="status" id="pStatus">Keep the phone at eye level, face filling about a third of the frame, soft light from the front.</div>
+</section>
+
+<!-- ====================== MAIN APP ====================== -->
+<div class="wrap" id="app">
+  <header>
+    <div>
+      <h1>Face <span>Read</span></h1>
+      <div class="sub">Face, hands and layered emotion, read with FACS. Everything runs in your browser; no video leaves your devices.</div>
+    </div>
+    <div class="controls">
+      <button id="startBtn" class="primary">Start camera</button>
+      <button id="recBtn" class="rec" disabled>● Record</button>
+      <button id="phoneBtn">Phone</button>
+      <button id="importBtn">Import video</button>
+      <input type="file" id="importFile" accept="video/*" hidden>
+      <button id="neutralBtn" disabled>Set neutral</button>
+      <button id="meshBtn">Mesh: on</button>
+    </div>
+  </header>
+
+  <div class="left">
+    <div class="stage" id="stage">
+      <video id="video" playsinline muted></video>
+      <video id="replay" playsinline hidden></video>
+      <canvas id="mesh"></canvas>
+      <div class="tag" id="tag"><i></i><span>Camera off</span></div>
+      <div class="src" id="srcTag">Laptop camera</div>
+      <div class="overlay" id="overlay"><div><strong>Click “Start camera”</strong>Or use <b style="color:var(--fg)">Phone</b> to film with your phone, or <b style="color:var(--fg)">Import video</b> to analyse a clip you already shot.</div></div>
+    </div>
+
+    <div class="panel" id="transport" hidden>
+      <div class="transport">
+        <button id="playBtn">Play</button>
+        <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="Scrub take">
+        <span class="tc" id="tc">0.0 / 0.0s</span>
+        <button id="liveBtn">Back to live</button>
+      </div>
+    </div>
+
+    <div class="panel" id="phonePanel" hidden>
+      <p class="label"><span>Film with your phone</span><button id="phoneClose" style="padding:2px 8px">Close</button></p>
+      <div class="phonebox">
+        <div class="qr" id="qr"><span class="note" style="color:#555">QR appears here</span></div>
+        <div style="min-width:0">
+          <ol>
+            <li>Phone and laptop on the same Wi-Fi.</li>
+            <li>Scan the code with the Android camera and open the link in Chrome.</li>
+            <li>Tap <b style="color:var(--fg)">Start camera &amp; connect</b> and allow the camera.</li>
+            <li>Record from either device: <kbd>R</kbd> here, or the red button on the phone.</li>
+          </ol>
+          <div id="hostBox" hidden style="margin-top:12px">
+            <p class="note" style="margin:0 0 6px">Phones only allow the camera on secure (https) pages, so the app has to be online for this. Paste its https address once:</p>
+            <div style="display:flex;gap:8px"><input type="url" id="hostUrl" placeholder="https://your-name.github.io/face-read/"><button id="hostSave">Save</button></div>
+          </div>
+          <div class="status" id="phoneStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="label"><span id="stripTitle">Performance strip · last 8 seconds</span><span id="fps">— fps</span></p>
+      <div class="strip" id="stripWrap"><canvas id="strip"></canvas></div>
+      <div class="legend"><span><b style="background:var(--eyes)"></b>Eyes</span><span><b style="background:var(--brows)"></b>Brows</span><span><b style="background:var(--mouth)"></b>Mouth &amp; jaw</span><span><b style="background:var(--head)"></b>Head</span><span><b style="background:var(--hands)"></b>Hands on face</span><span>Ticks = onsets</span></div>
+    </div>
+
+    <div class="keys"><span><kbd>R</kbd> record / stop</span><span><kbd>Space</kbd> play / pause take</span><span><kbd>←</kbd><kbd>→</kbd> step a frame</span><span><kbd>Esc</kbd> back to live</span></div>
+  </div>
+
+  <div class="rail">
+    <div class="panel">
+      <p class="label"><span>Reads as · Ekman EMFACS</span><span>estimate</span></p>
+      <div class="dominant" id="dominant">—</div>
+      <div class="conf" id="conf">Waiting for a face</div>
+      <div class="bars" id="emotionBars"></div>
+    </div>
+
+    <div class="panel">
+      <p class="label"><span>Layers</span><span>what’s under the surface</span></p>
+      <div class="layers">
+        <div class="lrows">
+          <div class="lrow"><span>Surface</span><b id="lSurface">—</b></div>
+          <div class="lrow"><span>Underneath (upper face)</span><b id="lUnder">—</b></div>
+          <div class="lrow blend"><span>Blend</span><b id="lBlend">—</b></div>
+          <div class="lrow hand"><span>Hands</span><b id="lHands">—</b></div>
+        </div>
+        <div><div class="circ"><canvas id="circ"></canvas></div><div class="credit">Russell circumplex: valence × arousal</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="label"><span>Beat order</span><span>which part moved first</span></p>
+      <div class="beat" id="beatNow"><span class="empty">Hold neutral, then play a reaction.</span></div>
+      <ul class="history" id="history"></ul>
+    </div>
+
+    <div class="panel">
+      <p class="label"><span>Action units · FACS</span><span>intensity A–E</span></p>
+      <div class="aus" id="aus"></div>
+    </div>
+
+    <div class="panel">
+      <div class="stats">
+        <span>Blinks <b id="blinks">0</b></span>
+        <span>Per min <b id="bpm">—</b></span>
+        <span>Neutral <b id="neutralState">not set</b></span>
+        <span>Hands <b id="handState">—</b></span>
+      </div>
+      <div class="slider" style="margin-top:12px"><label for="sens">Sensitivity</label><input type="range" id="sens" min="0.5" max="2" step="0.05" value="1"><b id="sensVal">1.00×</b></div>
+      <p class="note" style="margin:10px 0 0">Emotion names are estimated from muscle movement, so they read the face, not the feeling. Raise sensitivity if your expressions barely register; lower it if everything reads too strong.</p>
+    </div>
+  </div>
+
+  <section class="panel analysis" id="analysis" hidden>
+    <p class="label"><span>Take analysis</span><span id="takeMeta"></span></p>
+    <div class="row" style="margin:0 0 12px;justify-content:flex-start"><div class="takes" id="takes"></div></div>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-prompt" aria-selected="true">Acting prompt</button>
+      <button role="tab" id="tab-notes" aria-selected="false">Director notes</button>
+      <button role="tab" id="tab-lens" aria-selected="false">Theory lenses</button>
+      <button role="tab" id="tab-facs" aria-selected="false">FACS timeline</button>
+    </div>
+    <div class="opts" id="opts">
+      <label><input type="radio" name="detail" id="detailConcise" value="concise" checked> Concise</label>
+      <label><input type="radio" name="detail" id="detailFull" value="full"> Detailed</label>
+      <label><input type="checkbox" id="talking"> Talking take (mouth follows dialogue)</label>
+    </div>
+    <textarea id="out" readonly spellcheck="false" aria-label="Generated text"></textarea>
+    <div class="row">
+      <span class="toast" id="toast"></span>
+      <div class="controls">
+        <button id="copyBtn" class="primary">Copy</button>
+        <button id="saveVid">Save video</button>
+        <button id="saveJson">Save data (.json)</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+import { FaceLandmarker, HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const COL = { eyes:css("--eyes"), brows:css("--brows"), mouth:css("--mouth"), head:css("--head"), hands:css("--hands"), ember:css("--ember"), line:css("--line"), muted:css("--muted"), rec:css("--rec"), fg:css("--fg") };
+const clamp = v => Math.max(0, Math.min(1, v));
+const clamp1 = v => Math.max(-1, Math.min(1, v));
+const fmt = ms => (ms/1000).toFixed(1);
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+const store = { get(k){ try { return localStorage.getItem(k); } catch { return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch {} } };
+
+/* =====================================================================
+   PHONE MODE: this page was opened on a phone from the QR code
+   ===================================================================== */
+const LINK = new URLSearchParams(location.search).get("link");
+if (LINK){ $("app").hidden = true; $("phone").hidden = false; phoneMode(LINK); }
+
+function phoneMode(target){
+  let stream = null, facing = "user", peer = null, call = null, conn = null;
+  const status = (t, cls="") => { $("pStatus").textContent = t; $("pStatus").className = "status " + cls; };
+  const ptag = (cls, t) => { $("ptag").className = "tag " + cls; $("ptag").querySelector("span").textContent = t; };
+  async function getCam(){
+    stream?.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:facing, width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:60 } }, audio:false });
+    $("pvid").srcObject = stream; $("pvid").classList.toggle("back", facing !== "user");
+  }
+  function boostBitrate(pc){
+    try { pc.getSenders().forEach(s => { if (s.track?.kind !== "video") return; const p = s.getParameters(); p.encodings = p.encodings?.length ? p.encodings : [{}]; p.encodings[0].maxBitrate = 8_000_000; p.degradationPreference = "maintain-resolution"; s.setParameters(p).catch(() => {}); }); } catch {}
+  }
+  function connect(){
+    if (!window.Peer){ status("Couldn’t load the connection library. Check the phone’s internet.", "err"); return; }
+    peer = new Peer();
+    peer.on("open", () => {
+      call = peer.call(target, stream);
+      call.on("close", () => { ptag("", "Disconnected"); status("The laptop closed the link. Scan the QR code again.", "err"); });
+      setTimeout(() => call?.peerConnection && boostBitrate(call.peerConnection), 1500);
+      conn = peer.connect(target);
+      conn.on("open", () => { ptag("live", "Connected"); status("Connected. Your laptop is reading your face.", "ok"); $("pRec").disabled = false; });
+      conn.on("data", d => { if (d && typeof d.rec === "boolean"){ $("pRec").classList.toggle("on", d.rec); $("pRec").textContent = d.rec ? "■ Stop" : "● Record"; ptag(d.rec ? "rec" : "live", d.rec ? "Recording" : "Connected"); } });
+    });
+    peer.on("error", e => status(e.type === "peer-unavailable" ? "This link has expired. Open the Phone panel on the laptop and scan the new code." : "Connection problem: " + (e.message || e.type), "err"));
+  }
+  $("pStart").onclick = async () => {
+    $("pStart").disabled = true;
+    try { await getCam(); } catch (e){ status(e.name === "NotAllowedError" ? "Camera blocked. Allow it in Chrome’s site settings and try again." : "Couldn’t start the camera: " + e.message, "err"); $("pStart").disabled = false; return; }
+    $("pStart").hidden = true; $("pFlip").disabled = false; status("Connecting to your laptop…"); connect();
+  };
+  $("pFlip").onclick = async () => {
+    facing = facing === "user" ? "environment" : "user";
+    try { await getCam(); const track = stream.getVideoTracks()[0]; call?.peerConnection?.getSenders().find(s => s.track?.kind === "video")?.replaceTrack(track); } catch (e){ status("Couldn’t switch camera: " + e.message, "err"); }
+  };
+  $("pRec").onclick = () => conn?.open && conn.send({ cmd:"rec" });
+}
+
+/* =====================================================================
+   FACS: blendshapes → Ekman action units
+   ===================================================================== */
+const AU = [
+  { c:1,  n:"Inner brow raiser",    r:"brows", k:["browInnerUp","browInnerUp"],              g:1.3, p:"the inner corners of the brows {a}lift",                     s:"the inner brows settle" },
+  { c:2,  n:"Outer brow raiser",    r:"brows", k:["browOuterUpLeft","browOuterUpRight"],      g:1.6, p:"the outer brows {a}lift",                                    s:"the outer brows settle" },
+  { c:4,  n:"Brow lowerer",         r:"brows", k:["browDownLeft","browDownRight"],            g:1.6, p:"the brows {a}draw down and together",                        s:"the brow knit releases" },
+  { c:5,  n:"Upper lid raiser",     r:"eyes",  k:["eyeWideLeft","eyeWideRight"],              g:2.5, p:"the eyes {a}widen, more white showing above the iris",       s:"the eyes relax back" },
+  { c:6,  n:"Cheek raiser",         r:"eyes",  k:["cheekSquintLeft","cheekSquintRight"],      g:2.0, p:"the cheeks {a}lift, creasing the outer corners of the eyes", s:"the cheeks drop back" },
+  { c:7,  n:"Lid tightener",        r:"eyes",  k:["eyeSquintLeft","eyeSquintRight"],          g:1.6, p:"the lower lids {a}tense, narrowing the eyes",                s:"the lids relax" },
+  { c:9,  n:"Nose wrinkler",        r:"mouth", k:["noseSneerLeft","noseSneerRight"],          g:2.5, p:"the nose {a}wrinkles",                                       s:"the nose smooths out" },
+  { c:10, n:"Upper lip raiser",     r:"mouth", k:["mouthUpperUpLeft","mouthUpperUpRight"],    g:2.0, p:"the upper lip {a}lifts",                                     s:"the upper lip settles", speech:true },
+  { c:12, n:"Lip corner puller",    r:"mouth", k:["mouthSmileLeft","mouthSmileRight"],        g:1.3, p:"the mouth corners {a}pull up and back",                      s:"the smile fades" },
+  { c:14, n:"Dimpler",              r:"mouth", k:["mouthDimpleLeft","mouthDimpleRight"],      g:2.0, p:"the mouth corners {a}tighten into a dimple",                 s:"the dimple releases" },
+  { c:15, n:"Lip corner depressor", r:"mouth", k:["mouthFrownLeft","mouthFrownRight"],        g:2.5, p:"the mouth corners {a}pull down",                             s:"the mouth corners settle" },
+  { c:16, n:"Lower lip depressor",  r:"mouth", k:["mouthLowerDownLeft","mouthLowerDownRight"],g:2.0, p:"the lower lip {a}pulls down",                                s:"the lower lip settles", speech:true },
+  { c:17, n:"Chin raiser",          r:"mouth", k:["mouthShrugLower","mouthShrugLower"],       g:1.6, p:"the chin {a}pushes up, the lower lip pressing upward",       s:"the chin relaxes" },
+  { c:18, n:"Lip pucker",           r:"mouth", k:["mouthPucker","mouthPucker"],               g:1.3, p:"the lips {a}push forward",                                   s:"the lips relax", speech:true },
+  { c:20, n:"Lip stretcher",        r:"mouth", k:["mouthStretchLeft","mouthStretchRight"],    g:2.5, p:"the lips {a}stretch sideways, tight",                        s:"the lips relax" },
+  { c:22, n:"Lip funneler",         r:"mouth", k:["mouthFunnel","mouthFunnel"],               g:1.5, p:"the lips {a}funnel outward",                                 s:"the lips relax", speech:true },
+  { c:23, n:"Lip tightener",        r:"mouth", k:["mouthRollUpper","mouthRollLower"], avgLR:true, g:2.0, p:"the lips {a}tighten and narrow",                 s:"the lips loosen" },
+  { c:24, n:"Lip pressor",          r:"mouth", k:["mouthPressLeft","mouthPressRight"],        g:2.0, p:"the lips {a}press flat together",                            s:"the lips unpress" },
+  { c:26, n:"Jaw drop",             r:"mouth", k:["jawOpen","jawOpen"],                       g:1.4, p:"the jaw {a}drops, lips parting",                             s:"the jaw closes", speech:true },
+];
+const AU_INDEX = Object.fromEntries(AU.map((a,i) => [a.c, i]));
+const NAU = AU.length;
+const LETTERS = [["",0],["A",0.08],["B",0.2],["C",0.4],["D",0.6],["E",0.8]];
+const letter = v => { let L = ""; for (const [l,t] of LETTERS) if (v >= t) L = l; return L; };
+const ADVERB = { A:"barely ", B:"slightly ", C:"clearly ", D:"strongly ", E:"fully " };
+const WORD = { A:"a bare trace", B:"slight", C:"marked", D:"strong", E:"maximum" };
+const EMO = [
+  { n:"Happiness", aus:"6+12" }, { n:"Sadness", aus:"1+4+15" }, { n:"Surprise", aus:"1+2+5+26" },
+  { n:"Fear", aus:"1+2+4+5+7+20+26" }, { n:"Anger", aus:"4+5+7+23" }, { n:"Disgust", aus:"9+15+16" },
+  { n:"Contempt", aus:"R12+R14" }, { n:"Neutral", aus:"no AUs" },
+];
+const TOMKINS = { Happiness:"enjoyment–joy", Sadness:"distress–anguish", Surprise:"surprise–startle", Fear:"fear–terror", Anger:"anger–rage", Disgust:"disgust", Contempt:"dissmell / contempt" };
+
+/* Blends: layered expressions (Ekman’s blends and masks, Duchenne’s smile, Darwin’s grief muscles, Tomkins’ shame, Keltner’s embarrassment) */
+const BLENDS = {
+  miserable:  { label:"Miserable smile", by:"Ekman", read:"smiling through sadness",
+    phys:"the mouth smiles while the inner brows stay lifted and pinched together and the chin tightens; the sadness never leaves the forehead" },
+  laughcry:   { label:"Laughing into crying", by:"Ekman / Darwin", read:"laughter and crying sharing the face",
+    phys:"the laugh keeps coming, jaw opening in bursts, while the inner brows lift and pinch at the centre; the laugh and the cry share the face, one tipping into the other" },
+  tears:      { label:"Holding back tears", by:"Darwin / Ekman", read:"fighting tears",
+    phys:"the inner brows lift and pinch at the centre while the chin pushes up and the lips press together, refusing to break; nothing spills over" },
+  heldAnger:  { label:"Suppressed anger", by:"Ekman", read:"anger held in",
+    phys:"the brows press down, the lips press flat and the jaw stays shut; the anger is held in, never released" },
+  mask:       { label:"Masking smile", by:"Ekman / Duchenne", read:"a smile covering something else",
+    phys:"the mouth smiles but the eyes stay out of it and the brows keep their tension; the smile is a cover" },
+  nervous:    { label:"Nervous smile", by:"Ekman", read:"fear leaking through a smile",
+    phys:"the smile is stretched thin, lips pulled sideways and tight" },
+  embarrassed:{ label:"Embarrassed smile", by:"Keltner / Tomkins", read:"embarrassment",
+    phys:"a smile is fought down, the lips press over it and the eyes drop away" },
+  fearSurp:   { label:"Fearful surprise", by:"Ekman", read:"surprise turning to fear",
+    phys:"the brows shoot up and the eyes widen while the lips pull tight sideways" },
+  angryDisg:  { label:"Angry disgust", by:"Ekman", read:"anger mixed with disgust",
+    phys:"the brows press down while the nose wrinkles and the upper lip curls" },
+  shame:      { label:"Shame", by:"Tomkins / Izard", read:"hiding the face",
+    phys:"the head lowers and the eyes drop away from camera; the face hides" },
+};
+
+/* ---------- face regions for hand contact (landmark indices; image coords, so their left = image right) ---------- */
+const FACE_REGIONS = [
+  { id:"forehead", pts:[10,151], r:0.32 },
+  { id:"templeL", pts:[251], r:0.2 }, { id:"templeR", pts:[21], r:0.2 },
+  { id:"eyeL", pts:[473], r:0.15 }, { id:"eyeR", pts:[468], r:0.15 },
+  { id:"undereyeL", pts:[473], dy:0.14, r:0.13 }, { id:"undereyeR", pts:[468], dy:0.14, r:0.13 },
+  { id:"nose", pts:[4], r:0.12 },
+  { id:"mouth", pts:[13,14], r:0.17 },
+  { id:"chin", pts:[152], r:0.17 },
+  { id:"cheekL", pts:[425], r:0.17 }, { id:"cheekR", pts:[205], r:0.17 },
+  { id:"jawL", pts:[454], r:0.18 }, { id:"jawR", pts:[234], r:0.18 },
+  { id:"neck", neck:true, r:0.3 },
+];
+const sideOfRegion = id => id.endsWith("L") ? "left" : id.endsWith("R") ? "right" : "";
+const regionKind = id => id.replace(/[LR]$/, "");
+const REGION_TO = { forehead:"to the forehead, palm pressing against it", temple:"to their {s} temple, fingertips pressing", eye:"over their {s} eye", undereye:"under their {s} eye", nose:"to the nose", mouth:"over the mouth", chin:"under the chin", cheek:"against their {s} cheek", jaw:"to the side of the jaw by their {s} ear", neck:"to the throat" };
+const REGION_AT = { forehead:"the forehead", temple:"their {s} temple", eye:"their {s} eye", undereye:"under their {s} eye", nose:"the nose", mouth:"the mouth", chin:"the chin", cheek:"their {s} cheek", jaw:"the jaw by their {s} ear", neck:"the throat" };
+const REGION_NAME = { forehead:"forehead", temple:"{s} temple", eye:"{s} eye", undereye:"under {s} eye", nose:"nose", mouth:"mouth", chin:"chin", cheek:"{s} cheek", jaw:"{s} jaw", neck:"throat" };
+const rtext = (map, id) => map[regionKind(id)].replace("{s}", sideOfRegion(id));
+const REGION_MEANING = {
+  forehead:"forehead hold: headache, stress, overwhelm", temple:"temple: headache or hard thinking", eye:"covering the eyes: blocking out, despair, shame, exhaustion",
+  undereye:"under the eye: wiping tears (if it travels) or rubbing tired eyes (if it rubs)", nose:"nose touch: doubt, discomfort", mouth:"covering the mouth: shock, holding words back, or stifling a laugh",
+  chin:"hand under the chin: evaluating, thinking", cheek:"hand on cheek: listening, boredom, or tenderness", jaw:"jaw or ear touch: self-touch under discomfort", neck:"throat touch: self-soothing under stress (a pacifying gesture)"
+};
+
+/* ---------- state ---------- */
+let faceLM = null, handLM = null, camOn = false, mode = "off", source = "laptop";
+let showMesh = true, lastVideoTime = -1, sens = 1, tsLast = 0;
+let baseline = null, capturing = null, BSN = null, BSI = null, smoothBS = null;
+let faceModelBuf = null, handModelBuf = null, handsOk = null;
+const inPreview = (() => { try { return window.top !== window.self; } catch { return true; } })();
+const video = $("video"), replay = $("replay"), meshCv = $("mesh"), mctx = meshCv.getContext("2d");
+const stripCv = $("strip"), sctx = stripCv.getContext("2d"), circCv = $("circ"), cctx = circCv.getContext("2d");
+const nextTs = () => (tsLast = Math.max(tsLast + 1, performance.now()));
+
+/* =====================================================================
+   Per-frame features
+   ===================================================================== */
+function setNames(cats){ if (BSN) return; BSN = cats.map(c => c.categoryName); BSI = Object.fromEntries(BSN.map((n,i) => [n,i])); }
+function smoothInto(target, cats, a){ for (let i = 0; i < cats.length; i++) target[i] = target[i] === -1 ? cats[i].score : target[i] + (cats[i].score - target[i])*a; }
+function headPose(lm, vw, vh){
+  const P = i => [lm[i*2]*vw, lm[i*2+1]*vh];
+  const [nx,ny] = P(1), [lx] = P(234), [rx] = P(454), [,fy] = P(10), [,cy] = P(152), [ax,ay] = P(33), [bx,by] = P(263);
+  return { yaw:(nx - (lx+rx)/2)/Math.max(1, rx-lx), pitch:(ny - fy)/Math.max(1, cy-fy), roll:Math.atan2(by-ay, bx-ax)*180/Math.PI };
+}
+function gazeRaw(bs){
+  const g = n => bs[BSI[n]] ?? 0;
+  return { gx:(g("eyeLookOutLeft")+g("eyeLookInRight"))/2 - (g("eyeLookInLeft")+g("eyeLookOutRight"))/2, gy:(g("eyeLookUpLeft")+g("eyeLookUpRight"))/2 - (g("eyeLookDownLeft")+g("eyeLookDownRight"))/2 };
+}
+function handFeatures(lm, hands, vw, vh){
+  if (!hands?.length) return [];
+  const P = i => [lm[i*2]*vw, lm[i*2+1]*vh];
+  const [l0x,l0y] = P(234), [r0x,r0y] = P(454), fw = Math.hypot(r0x-l0x, r0y-l0y) || 1;
+  const [cx,cy] = P(168);
+  const centers = FACE_REGIONS.map(R => {
+    if (R.neck){ const [chx,chy] = P(152), [nx,ny] = P(4); return [chx + (chx-nx)*0.9, chy + (chy-ny)*0.9]; }
+    const s = R.pts.reduce((a,i) => { const [x,y] = P(i); return [a[0]+x, a[1]+y]; }, [0,0]);
+    return [s[0]/R.pts.length, s[1]/R.pts.length + (R.dy||0)*fw];
+  });
+  return hands.map(h => {
+    const H = i => [h.pts[i*2]*vw, h.pts[i*2+1]*vh];
+    const wrist = H(0);
+    const palm = [0,5,9,13,17].reduce((a,i) => { const [x,y] = H(i); return [a[0]+x/5, a[1]+y/5]; }, [0,0]);
+    const probes = [H(4), H(8), H(12), H(16), H(20), palm];
+    let best = null;
+    FACE_REGIONS.forEach((R,ri) => {
+      for (const p of probes){ const d = Math.hypot(p[0]-centers[ri][0], p[1]-centers[ri][1]) / (R.r*fw); if (d < 1 && (!best || d < best.d)) best = { d, id:R.id }; }
+    });
+    const dist = (a,b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
+    const ext = [[8,6],[12,10],[16,14],[20,18]].map(([t,pp]) => dist(H(t), wrist) > dist(H(pp), wrist)*1.12);
+    const n = ext.filter(Boolean).length;
+    const shape = n === 0 ? "fist" : n === 4 ? "open hand" : (ext[0] && n === 1) ? "pointing" : "relaxed hand";
+    const tip = H(8);
+    return { side:h.side, region:best?.id || null, strength: best ? clamp(1.2 - best.d) : 0, shape,
+      tip:[(tip[0]-cx)/fw, (tip[1]-cy)/fw] };
+  });
+}
+// raw frame → derived features, measured from a neutral baseline
+function derive(raw, base, vw, vh){
+  const bb = base?.bs, au = new Float32Array(NAU*2), bs = raw.bs;
+  AU.forEach((a,i) => {
+    const v = n => { const j = BSI[n]; return Math.max(0, (bs[j] ?? 0) - (bb ? bb[j] : 0)) * a.g; };
+    if (a.avgLR){ au[i*2] = au[i*2+1] = (v(a.k[0]) + v(a.k[1]))/2; } else { au[i*2] = v(a.k[0]); au[i*2+1] = v(a.k[1]); }
+  });
+  const h0 = base?.head ?? { yaw:0, pitch:0, roll:0, gx:0, gy:0 };
+  const hp = headPose(raw.lm, vw, vh), g = gazeRaw(bs);
+  const blink = ((bs[BSI.eyeBlinkLeft]??0) + (bs[BSI.eyeBlinkRight]??0))/2;
+  raw.au = au; raw.blink = blink;
+  raw.gx = blink > 0.4 ? 0 : g.gx - h0.gx; raw.gy = blink > 0.4 ? 0 : g.gy - h0.gy;
+  raw.yaw = hp.yaw - h0.yaw; raw.pitch = hp.pitch - h0.pitch; raw.roll = hp.roll - h0.roll;
+  raw.hf = handFeatures(raw.lm, raw.hands, vw, vh);
+  return raw;
+}
+function makeBaseline(frames, vw, vh){
+  const n = frames.length, bs = new Float32Array(frames[0].bs.length), head = { yaw:0, pitch:0, roll:0, gx:0, gy:0 };
+  for (const f of frames){ f.bs.forEach((v,i) => bs[i] += v/n); const hp = headPose(f.lm, vw, vh), g = gazeRaw(f.bs); head.yaw += hp.yaw/n; head.pitch += hp.pitch/n; head.roll += hp.roll/n; head.gx += g.gx/n; head.gy += g.gy/n; }
+  return { bs, head };
+}
+
+const auL = (f,c) => clamp(f.au[AU_INDEX[c]*2]*sens);
+const auR = (f,c) => clamp(f.au[AU_INDEX[c]*2+1]*sens);
+const auV = (f,c) => Math.max(auL(f,c), auR(f,c));
+
+function emotions(f){
+  const v = c => auV(f,c), m = (...cs) => cs.reduce((s,c) => s+v(c),0)/cs.length, e = {};
+  e.Happiness = clamp(v(12)*0.7 + v(6)*0.5);
+  e.Sadness   = clamp(m(1,15)*1.2 + v(4)*0.3 + v(17)*0.2 - v(12)*0.5 - v(2)*0.4);
+  e.Surprise  = clamp(m(1,2)*0.6 + v(5)*0.5 + v(26)*0.5 - v(4)*0.5 - v(12)*0.3);
+  e.Fear      = clamp(v(5)*0.45 + v(20)*0.55 + m(1,2,4)*0.35 + v(7)*0.15 - v(12)*0.6);
+  e.Anger     = clamp(v(4)*0.7 + Math.max(v(23),v(24))*0.45 + m(5,7)*0.35 - v(12)*0.6 - v(1)*0.3);
+  e.Disgust   = clamp(Math.max(v(9),v(10))*0.9 + m(15,16)*0.35 - v(12)*0.4);
+  const asym = Math.abs(auL(f,12)-auR(f,12)) + Math.abs(auL(f,14)-auR(f,14))*0.6;
+  e.Contempt  = clamp(Math.max(auL(f,12),auR(f,12)) > 0.1 ? asym*1.6 - Math.min(auL(f,12),auR(f,12))*0.5 : 0);
+  e.Neutral   = clamp(1 - Math.max(...Object.values(e))*1.5);
+  return e;
+}
+// Layered read: surface vs what the upper face says underneath, blends, Russell valence/arousal
+function layers(f){
+  const v = c => auV(f,c), e = emotions(f);
+  const grief = clamp(Math.sqrt(v(1)*v(4))*1.2 + v(1)*(1 - v(2))*0.3);
+  const lip = Math.max(v(23), v(24));
+  const sc = {};
+  if (v(12) >= 0.2) sc.miserable = Math.min(v(12), Math.max(grief, v(15), v(17)*0.8));
+  if (v(12) >= 0.2 && v(26) >= 0.2) sc.laughcry = Math.min(v(12), v(26), grief*1.1);
+  if (v(12) < 0.15) sc.tears = Math.min(grief, Math.max(v(17), lip));
+  if (v(26) < 0.12 && v(1) < 0.15) sc.heldAnger = Math.min(v(4), lip);
+  if (v(12) >= 0.25 && v(6) < 0.3*v(12) && grief < 0.15) sc.mask = Math.min(v(12), Math.max(v(4), v(20), v(9)));
+  if (v(12) >= 0.2) sc.nervous = Math.min(v(12), v(20));
+  if (v(12) >= 0.15 && (f.gy < -0.15 || f.pitch > 0.04)) sc.embarrassed = Math.min(v(12), lip + 0.05);
+  sc.fearSurp = Math.min((v(1)+v(2)+v(5))/3, v(20));
+  sc.angryDisg = Math.min(v(4), Math.max(v(9), v(10)));
+  if (v(12) < 0.15 && f.pitch > 0.05 && f.gy < -0.2) sc.shame = clamp(Math.min(f.pitch*6, -f.gy));
+  let blend = null, best = 0.15;
+  for (const k in sc) if (sc[k] >= best){ best = sc[k]; blend = k; }
+  const surface = EMO.map(x => x.n).filter(n => n !== "Neutral").sort((a,b) => e[b]-e[a])[0];
+  const upper = { Sadness: grief, Fear: clamp(((v(1)+v(2)+v(5))/3)*0.7 + v(4)*0.3) * (v(5) > 0.1 ? 1 : 0.5), Anger: clamp(v(4)*0.8 + v(7)*0.3 - v(1)*0.5), Surprise: clamp(((v(1)+v(2)+v(5))/3) - v(4)*0.6) };
+  const under = Object.keys(upper).sort((a,b) => upper[b]-upper[a])[0];
+  const duch = v(12) > 0.2 ? v(6) >= v(12)*0.35 : true;
+  const val = clamp1(e.Happiness*(duch ? 1 : 0.6) - e.Sadness - e.Anger*0.9 - e.Fear*0.9 - e.Disgust*0.8 - e.Contempt*0.6 + e.Surprise*0.1 - (blend === "miserable" || blend === "laughcry" ? 0.3 : 0));
+  const aro = clamp1(e.Surprise*0.9 + e.Fear*0.9 + e.Anger*0.7 + e.Happiness*0.35 + v(26)*0.3 + v(5)*0.3 - e.Sadness*0.4 - e.Neutral*0.3);
+  return { e, surface: e[surface] >= 0.2 ? surface : "Neutral", surfaceV: e[surface], under: upper[under] >= 0.15 && under !== surface ? under : null, underV: upper[under], blend, blendV: best, val, aro, duch };
+}
+function regions(f){
+  const gz = Math.hypot(f.gx, f.gy);
+  return {
+    brows: Math.max(auV(f,1), auV(f,2), auV(f,4)),
+    eyes:  Math.max(auV(f,5), auV(f,6), auV(f,7), clamp(gz*1.4)),
+    mouth: Math.max(...AU.filter(a => a.r === "mouth").map(a => auV(f,a.c))),
+    head:  clamp(Math.max(Math.abs(f.yaw)/0.15, Math.abs(f.pitch)/0.1, Math.abs(f.roll)/12)),
+    hands: f.hf?.reduce((m,h) => Math.max(m, h.strength), 0) || 0
+  };
+}
+const handText = hf => hf?.length ? hf.map(h => `${h.side === "a" ? "hand" : h.side + " hand"} · ${h.region ? rtext(REGION_NAME, h.region) : h.shape}`).join(", ") : "—";
+
+/* ---------- static UI ---------- */
+$("emotionBars").innerHTML = EMO.map(e => `<div class="bar" id="emo-${e.n}"><span>${e.n}<small>${e.aus}</small></span><div class="track"><div class="fill"></div></div><span class="num">0</span></div>`).join("");
+const emoEls = Object.fromEntries(EMO.map(e => { const r = $("emo-"+e.n); return [e.n, { row:r, fill:r.querySelector(".fill"), num:r.querySelector(".num") }]; }));
+$("aus").innerHTML = AU.map(a => `<div class="au ${a.r}" id="au-${a.c}"><span class="code">AU${a.c}</span><span class="name">${a.n}</span><div class="track"><div class="fill"></div></div><span class="lt"></span></div>`).join("");
+const auEls = AU.map(a => { const r = $("au-"+a.c); return { fill:r.querySelector(".fill"), lt:r.querySelector(".lt"), name:r.querySelector(".name") }; });
+
+function renderFrame(f, trail){
+  const L = layers(f), e = L.e;
+  const order = EMO.map(x => x.n).sort((a,b) => e[b]-e[a]), top = order[0], second = order[1];
+  $("dominant").textContent = top;
+  let conf = baseline || f.fromClip ? "Relative to your neutral" : "Set neutral for a cleaner read";
+  if (top !== "Neutral" && e[second] > 0.25 && second !== "Neutral") conf = `with ${second.toLowerCase()} underneath (${Math.round(e[second]*100)})`;
+  if (top === "Happiness" && auV(f,12) > 0.2) conf = L.duch ? "Duchenne smile: the eyes join in (AU6+12)" : "Social smile: mouth only, eyes don’t join (AU12 without AU6)";
+  $("conf").textContent = conf;
+  for (const x of EMO){ const el = emoEls[x.n], p = Math.round(e[x.n]*100); el.fill.style.width = p + "%"; el.num.textContent = p; el.row.classList.toggle("top", x.n === top); }
+  AU.forEach((a,i) => {
+    const l = auL(f,a.c), r = auR(f,a.c), v = Math.max(l,r), el = auEls[i];
+    el.fill.style.width = Math.round(v*100) + "%"; el.lt.textContent = letter(v);
+    const uni = a.k[0] !== a.k[1] && !a.avgLR && v > 0.15 && Math.abs(l-r) > 0.12 && Math.max(l,r) > 1.6*Math.min(l,r);
+    el.name.innerHTML = uni ? `${a.n} <span class="side">${l > r ? "L" : "R"} only</span>` : a.n;
+  });
+  $("lSurface").textContent = L.surface === "Neutral" ? "Neutral" : `${L.surface} (${letter(L.surfaceV)})`;
+  $("lUnder").textContent = L.under ? `${L.under} (${letter(L.underV)})` : "—";
+  $("lBlend").textContent = L.blend ? `${BLENDS[L.blend].label} · ${BLENDS[L.blend].by}` : "—";
+  $("lHands").textContent = handText(f.hf);
+  drawCirc(trail, L);
+  return L;
+}
+function drawCirc(trail, L){
+  const d = sizeCanvas(circCv), W = circCv.width, H = circCv.height, cx = W/2, cy = H/2, R = W/2 - 14*d;
+  cctx.clearRect(0,0,W,H);
+  cctx.strokeStyle = COL.line; cctx.lineWidth = 1*d;
+  cctx.beginPath(); cctx.arc(cx,cy,R,0,Math.PI*2); cctx.stroke();
+  cctx.beginPath(); cctx.moveTo(cx-R,cy); cctx.lineTo(cx+R,cy); cctx.moveTo(cx,cy-R); cctx.lineTo(cx,cy+R); cctx.stroke();
+  cctx.fillStyle = COL.muted; cctx.font = `${9*d}px IBM Plex Mono, monospace`; cctx.textAlign = "center";
+  cctx.fillText("aroused", cx, 9*d); cctx.fillText("calm", cx, H-2*d);
+  cctx.save(); cctx.translate(8*d, cy); cctx.rotate(-Math.PI/2); cctx.fillText("unpleasant", 0, 0); cctx.restore();
+  cctx.save(); cctx.translate(W-4*d, cy); cctx.rotate(Math.PI/2); cctx.fillText("pleasant", 0, 0); cctx.restore();
+  const P = p => [cx + p.val*R, cy - p.aro*R];
+  if (trail?.length > 1){ cctx.strokeStyle = COL.ember; cctx.globalAlpha = 0.45; cctx.lineWidth = 1.5*d; cctx.beginPath(); trail.forEach((p,i) => { const [x,y] = P(p); i ? cctx.lineTo(x,y) : cctx.moveTo(x,y); }); cctx.stroke(); cctx.globalAlpha = 1; }
+  if (L){ const [x,y] = P(L); cctx.fillStyle = COL.ember; cctx.beginPath(); cctx.arc(x,y,4*d,0,Math.PI*2); cctx.fill(); }
+}
+
+/* ---------- live beat order ---------- */
+const ON = 0.2, OFF = 0.1, REST_MS = 500;
+let beat = null, restSince = null, history = [];
+const liveStrip = [], liveOnsets = [];
+const RKEYS = ["eyes","brows","mouth","head","hands"];
+const RNAME = { eyes:"Eyes", brows:"Brows", mouth:"Mouth", head:"Head", hands:"Hands" };
+function updateBeat(now, r){
+  const allLow = RKEYS.every(k => r[k] < OFF);
+  if (!beat){
+    if (allLow) restSince ??= now;
+    const fired = RKEYS.filter(k => r[k] >= ON);
+    if (restSince !== null && now - restSince >= REST_MS && fired.length){ beat = { t0:now, order: fired.map(k => ({ k, dt:0 })) }; fired.forEach(k => liveOnsets.push({ t:now, k })); restSince = null; }
+    else if (!allLow) restSince = null;
+  } else {
+    RKEYS.forEach(k => { if (r[k] >= ON && !beat.order.some(o => o.k === k)){ beat.order.push({ k, dt: now - beat.t0 }); liveOnsets.push({ t:now, k }); } });
+    if (allLow){ restSince ??= now; if (now - restSince >= REST_MS){ history.unshift(beat); history = history.slice(0,5); beat = null; $("history").innerHTML = history.map(b => `<li>${chips(b.order)}</li>`).join(""); } }
+    else restSince = null;
+  }
+  $("beatNow").innerHTML = beat ? chips(beat.order) : `<span class="empty">${history.length ? "Resting. Play the next reaction." : "Hold neutral, then play a reaction."}</span>`;
+}
+function chips(order){
+  return order.map((o,i) => `${i ? '<span class="arrow">→</span>' : ''}<span class="chip ${o.k}">${RNAME[o.k]} ${i ? '+' + Math.round(o.dt) + 'ms' : '0'}</span>`).join("")
+    + (order.length > 1 && order[order.length-1].dt < 80 ? '<span class="together">fired together</span>' : '');
+}
+let blinkCount = 0, blinkClosed = false, firstFaceAt = null;
+function trackBlink(now, b){
+  if (!blinkClosed && b > 0.55){ blinkClosed = true; blinkCount++; }
+  if (blinkClosed && b < 0.3) blinkClosed = false;
+  $("blinks").textContent = blinkCount;
+  if (firstFaceAt){ const mins = (now - firstFaceAt)/60000; if (mins > 0.25) $("bpm").textContent = Math.round(blinkCount/mins); }
+}
+
+/* ---------- drawing ---------- */
+function sizeCanvas(cv){ const r = cv.getBoundingClientRect(), d = devicePixelRatio||1; const w = Math.max(1, Math.round(r.width*d)), h = Math.max(1, Math.round(r.height*d)); if (cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; } return d; }
+function drawMesh(lm, hands, vw, vh){
+  sizeCanvas(meshCv);
+  const W = meshCv.width, H = meshCv.height, d = devicePixelRatio||1;
+  mctx.clearRect(0,0,W,H);
+  if (!lm || !showMesh || !vw) return;
+  const s = Math.min(W/vw, H/vh), ox = (W - vw*s)/2, oy = (H - vh*s)/2, n = lm.length/2;
+  const line = (pts, np, conns, color, w) => { mctx.strokeStyle = color; mctx.lineWidth = w*d; mctx.beginPath(); for (const c of conns){ if (c.start >= np || c.end >= np) continue; mctx.moveTo(pts[c.start*2]*vw*s+ox, pts[c.start*2+1]*vh*s+oy); mctx.lineTo(pts[c.end*2]*vw*s+ox, pts[c.end*2+1]*vh*s+oy); } mctx.stroke(); };
+  line(lm, n, FaceLandmarker.FACE_LANDMARKS_TESSELATION, "rgba(232,228,220,0.10)", 0.6);
+  line(lm, n, [...FaceLandmarker.FACE_LANDMARKS_LEFT_EYE, ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, ...FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS, ...FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS], COL.eyes, 1.4);
+  line(lm, n, [...FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW, ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW], COL.brows, 1.6);
+  line(lm, n, FaceLandmarker.FACE_LANDMARKS_LIPS, COL.mouth, 1.4);
+  line(lm, n, FaceLandmarker.FACE_LANDMARKS_FACE_OVAL, "rgba(255,122,47,0.45)", 1);
+  for (const h of hands || []) line(h.pts, 21, HandLandmarker.HAND_CONNECTIONS, COL.hands, 2);
+}
+function drawStrip(points, t0, t1, playhead, onsets){
+  const d = sizeCanvas(stripCv), W = stripCv.width, H = stripCv.height;
+  sctx.clearRect(0,0,W,H);
+  const pad = 4*d, span = Math.max(1, t1 - t0), y = v => H - pad - v*(H-2*pad), x = t => (t - t0)/span*W;
+  sctx.strokeStyle = COL.line; sctx.lineWidth = 1; sctx.font = `${10*d}px IBM Plex Mono, monospace`; sctx.fillStyle = COL.muted; sctx.textAlign = "left";
+  const step = span > 20000 ? 5000 : span > 8000 ? 2000 : 1000;
+  for (let t = Math.ceil(t0/step)*step; t <= t1; t += step){ const xx = x(t); sctx.beginPath(); sctx.moveTo(xx,0); sctx.lineTo(xx,H); sctx.stroke(); }
+  if (playhead === null){ for (let s = 2; s <= 8; s += 2) sctx.fillText(`-${s}s`, W - s/8*W + 3*d, H-4*d); }
+  else for (let t = Math.ceil(t0/step)*step; t <= t1; t += step) sctx.fillText(`${t/1000}s`, x(t)+3*d, H-4*d);
+  sctx.setLineDash([3*d,4*d]); sctx.beginPath(); sctx.moveTo(0,y(ON)); sctx.lineTo(W,y(ON)); sctx.stroke(); sctx.setLineDash([]);
+  for (const k of ["hands","head","mouth","brows","eyes"]){
+    sctx.strokeStyle = COL[k]; sctx.lineWidth = (k === "head" || k === "hands" ? 1.2 : 2)*d; sctx.globalAlpha = k === "head" ? 0.7 : 1; sctx.beginPath();
+    points.forEach((p,i) => { const xx = x(p.t), yy = y(p.r[k]); i ? sctx.lineTo(xx,yy) : sctx.moveTo(xx,yy); });
+    sctx.stroke(); sctx.globalAlpha = 1;
+  }
+  for (const o of onsets){ sctx.fillStyle = COL[o.k]; sctx.fillRect(x(o.t)-1*d, 0, 2*d, 10*d); }
+  if (playhead !== null){ sctx.fillStyle = COL.ember; sctx.fillRect(x(playhead)-1*d, 0, 2*d, H); }
+}
+function setTag(cls, text){ const t = $("tag"); t.className = "tag " + cls; t.querySelector("span").textContent = text; }
+
+/* =====================================================================
+   Detection
+   ===================================================================== */
+function detect(el){
+  const ts = nextTs();
+  const res = faceLM.detectForVideo(el, ts);
+  const lmObj = res.faceLandmarks?.[0], cats = res.faceBlendshapes?.[0]?.categories;
+  if (!lmObj || !cats) return null;
+  setNames(cats);
+  const lm = new Float32Array(lmObj.length*2); for (let i = 0; i < lmObj.length; i++){ lm[i*2] = lmObj[i].x; lm[i*2+1] = lmObj[i].y; }
+  let hands = [];
+  if (handLM){
+    try {
+      const hr = handLM.detectForVideo(el, ts);
+      hands = (hr.landmarks || []).map((pts, i) => {
+        const a = new Float32Array(42); pts.forEach((p,j) => { a[j*2] = p.x; a[j*2+1] = p.y; });
+        const lab = (hr.handedness?.[i]?.[0]?.categoryName || "").toLowerCase();
+        return { side: lab === "left" ? "right" : lab === "right" ? "left" : "a", pts:a }; // the model assumes a mirrored image; ours is not
+      });
+    } catch {}
+  }
+  return { cats, lm, hands };
+}
+
+/* ---------- recording ---------- */
+let recorder = null, recChunks = [], recFrames = null, recStart = 0, recTimer = null, recBase = null;
+const takes = []; let curTake = -1;
+function startRecording(){
+  if (!camOn || recorder) return;
+  if (mode === "replay") goLive();
+  const stream = video.srcObject;
+  const mime = ["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"].find(m => MediaRecorder.isTypeSupported(m)) || "";
+  recorder = new MediaRecorder(stream, mime ? { mimeType:mime, videoBitsPerSecond:8e6 } : undefined);
+  recChunks = []; recFrames = []; recBase = baseline;
+  recorder.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+  recorder.onstop = finishTake;
+  recStart = performance.now(); recorder.start(250);
+  $("recBtn").classList.add("on"); $("recBtn").textContent = "■ Stop"; $("stage").classList.add("recording");
+  recTimer = setInterval(() => { const s = (performance.now() - recStart)/1000; setTag("rec", `Rec ${s.toFixed(1)}s`); if (s > 180) stopRecording(); }, 100);
+  sendPhone({ rec:true });
+}
+function stopRecording(){
+  if (!recorder || recorder.state === "inactive") return;
+  clearInterval(recTimer); recorder.stop();
+  $("recBtn").classList.remove("on"); $("recBtn").textContent = "● Record"; $("stage").classList.remove("recording");
+  sendPhone({ rec:false });
+}
+function finishTake(){
+  const blob = new Blob(recChunks, { type: recorder.mimeType || "video/webm" });
+  const frames = recFrames; recorder = null; recFrames = null;
+  if (!frames.length){ toast("No face was tracked during that take."); return; }
+  addTake({ blob, frames, vw: video.videoWidth, vh: video.videoHeight, neutral: !!recBase, source });
+}
+function addTake(t){
+  const take = { id: takes.length + 1, url: URL.createObjectURL(t.blob), dur: t.frames[t.frames.length-1].t, ...t };
+  takes.push(take); selectTake(takes.length - 1); enterReplay();
+}
+
+/* ---------- import a video file (phone footage etc.) ---------- */
+async function importVideo(file){
+  const ov = $("overlay");
+  if (!(await ensureModels())) return;
+  if (camOn) stopCamera(true);
+  if (mode === "replay") goLive();
+  ov.hidden = false; ov.innerHTML = `<div style="width:min(360px,80%)"><strong>Reading the clip</strong><span id="impTxt">Preparing…</span><div class="progress"><i id="impBar"></i></div></div>`;
+  const el = document.createElement("video"); el.muted = true; el.playsInline = true; el.preload = "auto";
+  el.src = URL.createObjectURL(file);
+  try { await new Promise((res, rej) => { el.onloadeddata = res; el.onerror = () => rej(new Error("Chrome can’t read this video format. Try an MP4 (H.264).")); }); }
+  catch (e){ ov.innerHTML = `<div><strong>Couldn’t open the video</strong>${e.message}</div>`; return; }
+  const dur = el.duration, step = 1/30, vw = el.videoWidth, vh = el.videoHeight, raws = [], sm = [];
+  for (let t = 0, i = 0; t <= dur; t += step, i++){
+    el.currentTime = t;
+    await new Promise(r => { el.onseeked = r; });
+    const d = detect(el);
+    if (d){
+      if (!sm.length) d.cats.forEach(() => sm.push(-1));
+      smoothInto(sm, d.cats, 0.6);
+      raws.push({ t: t*1000, bs: Float32Array.from(sm), lm: d.lm, hands: d.hands, fromClip:true });
+    }
+    if (i % 6 === 0){ $("impBar").style.width = Math.round(t/dur*100) + "%"; $("impTxt").textContent = `${Math.round(t/dur*100)}% · ${raws.length} frames with a face`; await new Promise(r => setTimeout(r)); }
+  }
+  if (raws.length < 10){ ov.innerHTML = '<div><strong>No face found</strong>Make sure the face is clearly visible and well lit.</div>'; return; }
+  const t0 = raws[0].t; raws.forEach(r => r.t -= t0);
+  const base = makeBaseline(raws.slice(0, Math.min(15, raws.length)), vw, vh);
+  raws.forEach(r => derive(r, base, vw, vh));
+  ov.innerHTML = '<div><strong>Clip analysed</strong>Press Space to play it back.</div>';
+  addTake({ blob:file, frames:raws, vw, vh, neutral:true, source:"import", name:file.name });
+  ov.hidden = true;
+  toast("Neutral was taken from the first half second of the clip.");
+}
+$("importBtn").onclick = () => $("importFile").click();
+$("importFile").onchange = () => { const f = $("importFile").files?.[0]; if (f) importVideo(f); $("importFile").value = ""; };
+
+/* ---------- replay ---------- */
+let playing = false, scrubbing = false;
+function selectTake(i){
+  curTake = i; const tk = takes[i];
+  $("analysis").hidden = false;
+  $("takes").innerHTML = takes.map((t,j) => `<button data-i="${j}" class="${j === i ? "active" : ""}">Take ${t.id}${t.source === "import" ? " · clip" : t.source === "phone" ? " · phone" : ""} · ${fmt(t.dur)}s</button>`).join("");
+  $("takes").querySelectorAll("button").forEach(b => b.onclick = () => { selectTake(+b.dataset.i); enterReplay(); });
+  $("takeMeta").textContent = `${tk.frames.length} frames · ${Math.round(tk.frames.length / Math.max(0.1, tk.dur/1000))} fps${tk.neutral ? "" : " · no neutral set"}`;
+  tk.analysis = analyze(tk); tk.strip = null; tk.trail = null;
+  renderOutput();
+}
+function enterReplay(){
+  const tk = takes[curTake]; if (!tk) return;
+  mode = "replay"; playing = false;
+  video.hidden = true; replay.hidden = false; $("transport").hidden = false; $("overlay").hidden = true;
+  replay.src = tk.url; replay.load();
+  replay.onloadedmetadata = () => { if (replay.duration === Infinity){ replay.currentTime = 1e101; replay.ontimeupdate = () => { replay.ontimeupdate = null; replay.currentTime = 0; }; } };
+  $("stripWrap").classList.add("seekable"); $("stripTitle").textContent = `Take ${tk.id} · full take`;
+  $("playBtn").textContent = "Play"; setTag("play", `Take ${tk.id} · replay`);
+  requestAnimationFrame(replayLoop);
+}
+function goLive(){
+  if (mode !== "replay") return;
+  replay.pause(); playing = false; mode = camOn ? "live" : "off";
+  video.hidden = false; replay.hidden = true; $("transport").hidden = true;
+  $("stripWrap").classList.remove("seekable"); $("stripTitle").textContent = "Performance strip · last 8 seconds";
+  if (camOn){ setTag("live","Tracking"); requestAnimationFrame(loop); } else { setTag("", "Camera off"); drawMesh(null); }
+}
+function frameAt(tk, t){ let lo = 0, hi = tk.frames.length - 1; while (lo < hi){ const m = (lo+hi+1) >> 1; if (tk.frames[m].t <= t) lo = m; else hi = m - 1; } return tk.frames[lo]; }
+function replayLoop(){
+  if (mode !== "replay") return;
+  const tk = takes[curTake];
+  const t = Math.min(tk.dur, replay.currentTime*1000);
+  const f = frameAt(tk, t);
+  tk.trail ??= tk.frames.filter((_,i) => i % 2 === 0).map(fr => { const L = layers(fr); return { val:L.val, aro:L.aro }; });
+  renderFrame(f, tk.trail);
+  drawMesh(f.lm, f.hands, tk.vw, tk.vh);
+  drawStrip(tk.strip ??= tk.frames.map(fr => ({ t:fr.t, r:regions(fr) })), 0, tk.dur, t, tk.analysis.onsets);
+  $("tc").textContent = `${fmt(t)} / ${fmt(tk.dur)}s`;
+  if (!scrubbing) $("scrub").value = Math.round(t / Math.max(1, tk.dur) * 1000);
+  if (replay.ended && playing){ playing = false; $("playBtn").textContent = "Play"; }
+  requestAnimationFrame(replayLoop);
+}
+function togglePlay(){
+  if (mode !== "replay") return;
+  if (replay.paused){ if (replay.ended || replay.currentTime*1000 >= takes[curTake].dur - 30) replay.currentTime = 0; replay.play(); playing = true; $("playBtn").textContent = "Pause"; }
+  else { replay.pause(); playing = false; $("playBtn").textContent = "Play"; }
+}
+$("scrub").addEventListener("input", () => { scrubbing = true; const tk = takes[curTake]; if (tk) replay.currentTime = $("scrub").value/1000 * tk.dur/1000; });
+$("scrub").addEventListener("change", () => { scrubbing = false; });
+$("stripWrap").addEventListener("click", e => { if (mode !== "replay") return; const r = stripCv.getBoundingClientRect(); replay.currentTime = (e.clientX - r.left)/r.width * takes[curTake].dur/1000; });
+$("playBtn").onclick = togglePlay;
+$("liveBtn").onclick = goLive;
+
+/* =====================================================================
+   Analysis: events → acting prompt, notes, theory lenses, FACS timeline
+   ===================================================================== */
+function segments(frames, val, on, off, minDur, gap){
+  const segs = []; let cur = null;
+  for (const f of frames){
+    const v = val(f);
+    if (!cur && v >= on) cur = { start:f.t, end:f.t, peak:v, apex:f.t, apexF:f };
+    else if (cur){ if (v >= off){ cur.end = f.t; if (v > cur.peak){ cur.peak = v; cur.apex = f.t; cur.apexF = f; } } else { segs.push(cur); cur = null; } }
+  }
+  if (cur) segs.push(cur);
+  const merged = [];
+  for (const s of segs){ const p = merged[merged.length-1]; if (p && s.start - p.end < gap){ p.end = s.end; if (s.peak > p.peak){ p.peak = s.peak; p.apex = s.apex; p.apexF = s.apexF; } } else merged.push({ ...s }); }
+  return merged.filter(s => s.end - s.start >= minDur);
+}
+function sideOf(frames, s, c){
+  let l = 0, r = 0, n = 0;
+  for (const f of frames){ if (f.t < s.start || f.t > s.end) continue; l += auL(f,c); r += auR(f,c); n++; }
+  l /= n||1; r /= n||1;
+  if (Math.abs(l-r) < 0.08) return "both";
+  return Math.max(l,r) > Math.min(l,r)*2.2 ? (l > r ? "L only" : "R only") : (l > r ? "L more" : "R more");
+}
+const SIDE_TXT = { "L only":" on their left side only", "R only":" on their right side only", "L more":", stronger on their left", "R more":", stronger on their right" };
+function gazeDir(gx, gy){
+  const ax = Math.abs(gx), ay = Math.abs(gy), h = gx > 0 ? "to their left" : "to their right", v = gy > 0 ? "up" : "down";
+  return ax > ay*1.8 ? h : ay > ax*1.8 ? v : `${v} and ${h}`;
+}
+function handEvent(cur){
+  const kind = cur.key[0], val = cur.key.slice(2);
+  const who = cur.side === "a" ? "a hand" : `their ${cur.side} hand`;
+  if (kind === "s") return { kind:"hand", contact:false, start:cur.start, end:cur.end, peak:0.5, region:"hands", shape:val,
+    text: val === "fist" ? `${who} closes into a fist` : val === "open hand" ? `${who} opens, palm toward camera` : val === "pointing" ? `${who} points` : `${who} comes up into frame` };
+  const p = cur.path, dx = p[p.length-1][0] - p[0][0], dy = p[p.length-1][1] - p[0][1];
+  let rev = 0, last = 0;
+  for (let i = 2; i < p.length; i++){ const d = p[i][0] - p[i-2][0]; if (Math.abs(d) > 0.02){ const s = Math.sign(d); if (last && s !== last) rev++; last = s; } }
+  const k = regionKind(val), travel = Math.hypot(dx, dy), sideW = sideOfRegion(val);
+  let motion = "rests", text;
+  if (rev >= 3) motion = "rubs"; else if (travel > 0.18) motion = ["undereye","eye","cheek"].includes(k) ? "wipes" : "slides";
+  if (motion === "wipes") text = k === "undereye" ? `${who} wipes under their ${sideW} eye` : k === "eye" ? `${who} wipes across their ${sideW} eye` : `${who} wipes down their ${sideW} cheek`;
+  else if (motion === "rubs") text = `${who} rubs ${rtext(REGION_AT, val)}`;
+  else if (motion === "slides") text = `${who} goes ${rtext(REGION_TO, val)} and slides ${dy > 0.12 ? "down the face" : "across"}`;
+  else text = `${who} goes ${rtext(REGION_TO, val)}`;
+  return { kind:"hand", contact:true, start:cur.start, end:cur.end, peak:cur.peak, region:"hands", where:val, motion, text };
+}
+
+function analyze(tk){
+  const F = tk.frames, ev = [];
+  for (const a of AU) for (const s of segments(F, f => auV(f,a.c), 0.12, 0.07, 40, 160))
+    ev.push({ kind:"au", au:a, start:s.start, end:s.end, apex:s.apex, peak:s.peak, L:letter(s.peak), side: a.k[0] === a.k[1] || a.avgLR ? "both" : sideOf(F, s, a.c), region:a.r });
+  for (const s of segments(F, f => Math.hypot(f.gx, f.gy), 0.22, 0.14, 150, 120))
+    ev.push({ kind:"gaze", start:s.start, end:s.end, apex:s.apex, peak:s.peak, dir:gazeDir(s.apexF.gx, s.apexF.gy), far:s.peak > 0.45, region:"eyes" });
+  for (const s of segments(F, f => Math.abs(f.yaw)/0.12, 0.45, 0.3, 200, 150))
+    ev.push({ kind:"head", start:s.start, end:s.end, apex:s.apex, peak:Math.min(1,s.peak), text:`the head ${s.peak > 1 ? "" : "slightly "}turns toward their ${s.apexF.yaw > 0 ? "left" : "right"}`, region:"head" });
+  for (const s of segments(F, f => Math.abs(f.roll)/9, 0.45, 0.3, 200, 150))
+    ev.push({ kind:"head", start:s.start, end:s.end, apex:s.apex, peak:Math.min(1,s.peak), text:`the head ${s.peak > 1 ? "" : "slightly "}tilts toward their ${s.apexF.roll > 0 ? "left" : "right"} shoulder`, region:"head" });
+  for (const s of segments(F, f => Math.abs(f.pitch)/0.08, 0.45, 0.3, 120, 120)){
+    const down = s.apexF.pitch > 0, nod = down && s.end - s.start < 650;
+    ev.push({ kind:"head", start:s.start, end:s.end, apex:s.apex, peak:Math.min(1,s.peak), nod, text: nod ? "a small nod" : down ? `the chin ${s.peak > 1 ? "" : "slightly "}dips, head lowering` : `the chin ${s.peak > 1 ? "" : "slightly "}lifts`, region:"head" });
+  }
+  // Hands: contact runs per hand, plus shapes held away from the face
+  for (const side of ["left","right","a"]){
+    let cur = null;
+    const flush = () => { if (cur && cur.end - cur.start >= 200) ev.push(handEvent(cur)); cur = null; };
+    for (const f of F){
+      const h = f.hf?.find(x => x.side === side);
+      const key = h ? (h.region ? "c:" + h.region : "s:" + h.shape) : null;
+      if (key && cur && (cur.key === key || (key[0] === "c" && cur.key[0] === "c" && regionKind(key.slice(2)) === regionKind(cur.key.slice(2))))){ cur.end = f.t; cur.path.push(h.tip); cur.peak = Math.max(cur.peak, h.strength); }
+      else if (!key && cur && f.t - cur.end < 200) continue;
+      else { flush(); if (key) cur = { key, side, start:f.t, end:f.t, path:[h.tip], peak:h.strength }; }
+    }
+    flush();
+  }
+  ev.sort((a,b) => a.start - b.start);
+  const blinks = [];
+  { let closed = null; for (const f of F){ if (closed === null && f.blink > 0.5) closed = f.t; else if (closed !== null && f.blink < 0.3){ blinks.push({ t:closed, dur:f.t - closed }); closed = null; } } }
+  const per = F.map(f => ({ t:f.t, ...layers(f) }));
+  const runsOf = (key, minMs) => {
+    const runs = []; for (const p of per){ const k = p[key]; const last = runs[runs.length-1]; if (last && last.n === k) last.end = p.t; else runs.push({ n:k, start:p.t, end:p.t }); }
+    const out = []; for (const r of runs){ if (r.n == null || r.end - r.start < minMs) continue; const p = out[out.length-1]; if (p && p.n === r.n && r.start - p.end < 300) p.end = r.end; else out.push({ ...r }); }
+    return out;
+  };
+  const emoRuns = runsOf("surface", 250), blendRuns = runsOf("blend", 250), underRuns = runsOf("under", 300);
+  const transitions = [];
+  for (let i = 0; i < emoRuns.length; i++){
+    const a = emoRuns[i]; if (a.n !== "Happiness") continue;
+    const b = emoRuns.slice(i+1).find(r => r.n !== "Neutral" && r.start - a.end < 1500);
+    if (b && b.n === "Sadness") transitions.push({ t:b.start });
+  }
+  const clusters = []; let cl = null;
+  for (const e of ev.filter(e => e.peak >= 0.2 || e.kind !== "au")){
+    if (!cl || e.start - cl.end > 400){ cl = { start:e.start, end:e.end, ev:[e] }; clusters.push(cl); } else { cl.ev.push(e); cl.end = Math.max(cl.end, e.end); }
+  }
+  const onsets = [];
+  for (const c of clusters){ const seen = new Set(); for (const e of c.ev){ if (!seen.has(e.region)){ seen.add(e.region); onsets.push({ t:e.start, k:e.region }); } } }
+  const micro = ev.filter(e => e.kind === "au" && e.end - e.start <= 500 && e.peak >= 0.15);
+  return { ev, blinks, per, emoRuns, blendRuns, underRuns, transitions, clusters, onsets, micro };
+}
+
+function buildPrompt(tk, full, talking){
+  const A = tk.analysis, dur = tk.dur;
+  const keep = e => {
+    if (e.kind === "au"){ if (talking && e.au.speech) return false; if (!full && e.end - e.start < 150) return false; return full ? e.peak >= 0.12 : e.peak >= 0.2; }
+    if (e.kind === "gaze") return full || e.peak >= 0.3;
+    if (e.kind === "hand") return e.contact || e.end - e.start >= 400;
+    return full || e.peak >= 0.6 || e.nod;
+  };
+  const evs = A.ev.filter(keep);
+  const phrase = e => {
+    if (e.kind === "au") return (full && e.end - e.start <= 500 ? "a flicker: " : "") + e.au.p.replace("{a}", ADVERB[e.L] || "") + (SIDE_TXT[e.side] || "");
+    if (e.kind === "gaze") return `the eyes shift ${e.far ? "" : "briefly "}${e.dir}`;
+    return e.text;
+  };
+  const lines = [], groups = [], releases = [];
+  for (const e of evs){ const g = groups[groups.length-1]; if (g && e.start - g.t <= 120) g.items.push(e); else groups.push({ t:e.start, items:[e] }); }
+  for (const g of groups){
+    const parts = g.items.map(e => {
+      let p = phrase(e); const hold = e.end - e.start;
+      if (!full && hold >= 600 && e.kind !== "gaze") p += ` (holds ${fmt(hold)}s)`;
+      if (full && hold >= 250 && e.end < dur - 150) releases.push({ t:e.end, e });
+      return p;
+    });
+    if (!full){ const gz = g.items.find(e => e.kind === "gaze"); if (gz && gz.end < dur - 200) parts[g.items.indexOf(gz)] += `, back to camera by ${fmt(gz.end)}s`; }
+    const join = parts.length > 1 ? parts.slice(0,-1).join(", ") + " and " + parts[parts.length-1] : parts[0];
+    lines.push({ t:g.t, s: g.items.length > 1 ? `${fmt(g.t)}s: At the same moment, ${join}.` : `${fmt(g.t)}s: ${cap(join)}.` });
+  }
+  for (const r of releases){
+    const what = r.e.kind === "au" ? r.e.au.s : r.e.kind === "gaze" ? "the eyes return to camera" : r.e.kind === "hand" ? "the hand drops away" : "the head settles back";
+    lines.push({ t:r.t, s:`${fmt(r.t)}s: ${cap(what)}.` });
+  }
+  if (!full) for (const e of evs) if (e.kind === "hand" && e.contact && e.end < dur - 200) lines.push({ t:e.end, s:`${fmt(e.end)}s: The hand drops away.` });
+  lines.sort((a,b) => a.t - b.t);
+
+  const auEv = A.ev.filter(e => e.kind === "au" && !(talking && e.au.speech));
+  const peakL = letter(auEv.reduce((m,e) => Math.max(m, e.peak), 0));
+  const first = evs[0], out = [];
+  out.push(`Close-up performance, ${fmt(dur)}s, one continuous take, no cuts. ${talking ? "The character speaks the line; the mouth articulates naturally with the dialogue while the rest of the face plays the beats below." : "No dialogue."} ${!first || first.start > 300 ? "Starts from a relaxed neutral face, eyes steady on camera." : "The reaction begins immediately."}`);
+  out.push("");
+  if (lines.length) lines.forEach(l => out.push(l.s)); else out.push("The face stays almost still: a held, neutral look with no clear expression change.");
+  const blends = A.blendRuns.filter(r => r.end - r.start >= 300);
+  const unders = A.underRuns.filter(u => { const s = A.per.filter(p => p.t >= u.start && p.t <= u.end); return s.length && s.filter(p => p.surface !== "Neutral" && p.surface !== u.n).length > s.length*0.5; });
+  if (blends.length || unders.length || A.transitions.length){
+    out.push(""); out.push("Layers (more than one thing on the face at once, never one clean emotion):");
+    const ll = [];
+    for (const b of blends) ll.push({ t:b.start, s:`${fmt(b.start)}–${fmt(b.end)}s: ${cap(BLENDS[b.n].phys)}.` });
+    for (const u of unders){
+      if (blends.some(b => b.start < u.end && b.end > u.start)) continue;
+      const brow = { Sadness:"the inner brows stay lifted and pinched", Fear:"the brows stay raised and drawn together, the eyes a little too open", Anger:"the brows stay pressed down", Surprise:"the brows stay lifted" }[u.n];
+      ll.push({ t:u.start, s:`${fmt(u.start)}–${fmt(u.end)}s: Whatever the mouth does, ${brow}; the upper face keeps its own feeling underneath.` });
+    }
+    for (const t of A.transitions) ll.push({ t:t.t, s:`${fmt(t.t)}s: The laugh tips over. The jaw stays open but the mouth corners begin to drop, the inner brows lift and pinch and the chin starts to push up; the laughing turns into crying without a clean break.` });
+    ll.sort((a,b) => a.t - b.t).forEach(l => out.push(l.s));
+  }
+  out.push("");
+  const bl = A.blinks;
+  if (bl.length){
+    const slow = bl.filter(b => b.dur > 300);
+    let s = `Blinks: ${bl.length} (at ${bl.map(b => fmt(b.t) + "s").join(", ")})${slow.length ? `; slow, heavy blink at ${slow.map(b => fmt(b.t) + "s").join(", ")}` : ", normal speed"}.`;
+    const pts = [0, ...bl.map(b => b.t), dur]; let gapMax = 0, ga = 0, gb = 0;
+    for (let i = 1; i < pts.length; i++) if (pts[i] - pts[i-1] > gapMax){ gapMax = pts[i] - pts[i-1]; ga = pts[i-1]; gb = pts[i]; }
+    if (gapMax > 4000) s += ` No blinking from ${fmt(ga)}s to ${fmt(gb)}s.`;
+    out.push(s);
+  } else out.push(dur > 3000 ? `No blinks for the whole ${fmt(dur)}s; the stare is held.` : "No blinks.");
+  const smiles = auEv.filter(e => e.au.c === 12 && e.peak >= 0.2);
+  if (smiles.length){
+    const s = smiles[0];
+    const duch = auEv.some(e => e.au.c === 6 && e.start < s.end && e.end > s.start && e.peak >= s.peak*0.35);
+    const others = auEv.filter(e => e.au.c !== 12 && e.au.c !== 6 && e.peak >= 0.2);
+    const after = others.length && others.every(e => e.end <= s.start + 100);
+    out.push(`Smile: ${duch ? "the eyes join the smile (cheeks lift, outer eye corners crease)" : "it stays in the mouth; the eyes don’t join"}${after ? ", and it arrives as an after-comment, once the earlier expression has resolved" : others.some(e => e.start < s.end && e.end > s.start) ? ", blended over the other expression" : ""}.`);
+  }
+  const has = c => auEv.some(e => e.au.c === c && e.peak >= 0.12), absent = [];
+  if (!has(4)) absent.push("the brows never knit");
+  if (!has(7) && !has(6)) absent.push("no tension around the eyes");
+  if (!has(12)) absent.push("no smile");
+  if (!A.ev.some(e => e.kind === "hand")) absent.push("hands stay out of frame");
+  if (absent.length && lines.length) out.push(`Absent: ${absent.join("; ")}.`);
+  if (peakL) out.push(`Intensity ceiling: ${WORD[peakL]}. ${["A","B"].includes(peakL) ? "Keep every movement small and contained; nothing reads as performed." : "The peak lands once; everything around it stays smaller."}`);
+  if (!A.ev.some(e => e.kind === "head" && keep(e))) out.push("Head stays steady, no turns or tilts.");
+  out.push("Between beats the face stays loose and alive with small micro-movements; no frozen, held poses.");
+  return out.join("\n");
+}
+
+function texture(tk){
+  const A = tk.analysis, n = A.per.length || 1;
+  const layered = A.per.filter(p => p.blend || (p.under && p.surface !== "Neutral")).length / n;
+  const still = A.per.filter(p => p.e.Neutral > 0.7).length / n;
+  const spreads = A.clusters.map(c => { const seen = []; for (const e of c.ev) if (!seen.find(s => s.k === e.region)) seen.push({ k:e.region, t:e.start }); return seen.length > 1 ? seen[seen.length-1].t - seen[0].t : null; }).filter(x => x !== null);
+  const together = spreads.filter(s => s < 80).length;
+  const bil = A.ev.filter(e => e.kind === "au" && e.peak >= 0.2 && e.au.k[0] !== e.au.k[1] && !e.au.avgLR);
+  const asym = bil.filter(e => e.side !== "both").length;
+  let vMin = 1, vMax = -1, aMin = 1, aMax = -1; for (const p of A.per){ vMin = Math.min(vMin, p.val); vMax = Math.max(vMax, p.val); aMin = Math.min(aMin, p.aro); aMax = Math.max(aMax, p.aro); }
+  return { layered, still, spreads, together, asym, bilN: bil.length, micro: A.micro.length, vRange: vMax - vMin, aRange: aMax - aMin };
+}
+function buildNotes(tk){
+  const A = tk.analysis, X = texture(tk), out = [];
+  out.push(`TAKE ${tk.id} · ${fmt(tk.dur)}s · ${tk.frames.length} frames${tk.name ? " · " + tk.name : ""}${tk.neutral ? "" : " · neutral was not set, readings are less reliable"}`);
+  out.push("");
+  out.push("NUANCE CHECK  (The Room  ←→  Heat / There Will Be Blood)");
+  const flag = (ok, s) => out.push(`${ok ? "✓" : "✗"} ${s}`);
+  flag(X.layered >= 0.15, `Layering: ${Math.round(X.layered*100)}% of the take has two feelings on the face at once${X.layered < 0.15 ? " (one clean emotion at a time reads flat)" : ""}.`);
+  flag(X.together === 0, X.spreads.length ? `Staggering: ${X.spreads.length - X.together} of ${X.spreads.length} reactions build part by part${X.together ? `; ${X.together} fired all at once, which reads as a mask` : ""}.` : "Staggering: no multi-part reactions to judge.");
+  flag(X.bilN === 0 || X.asym/X.bilN >= 0.2, `Asymmetry: ${X.asym} of ${X.bilN} movements favour one side${X.bilN && X.asym/X.bilN < 0.2 ? " (perfect symmetry reads as posed)" : ""}.`);
+  flag(X.still >= 0.15 && X.still <= 0.7, `Stillness: ${Math.round(X.still*100)}% of the take is near-neutral${X.still > 0.7 ? " (very little happens)" : X.still < 0.15 ? " (no rest; the face is always busy)" : ""}.`);
+  out.push(`· Micro-expressions under half a second: ${X.micro}. Circumplex range: valence ${X.vRange.toFixed(2)}, arousal ${X.aRange.toFixed(2)}.`);
+  out.push("");
+  out.push("EMOTIONAL READ (for you; keep the labels out of the prompt)");
+  const runs = A.emoRuns.filter(r => r.end - r.start >= 200);
+  out.push(runs.length ? runs.map(r => `${r.n} ${fmt(r.start)}–${fmt(r.end)}s`).join("  →  ") : "Neutral throughout.");
+  if (A.blendRuns.length) out.push("Blends: " + A.blendRuns.map(b => `${BLENDS[b.n].label} ${fmt(b.start)}–${fmt(b.end)}s`).join(" · "));
+  if (A.underRuns.length) out.push("Upper face underneath: " + A.underRuns.map(u => `${u.n} ${fmt(u.start)}–${fmt(u.end)}s`).join(" · "));
+  for (const t of A.transitions) out.push(`Transition at ${fmt(t.t)}s: laughter turning into crying.`);
+  if (runs.some(r => r.n !== "Neutral")) out.push(`Subtext: write one line for the beat that needs it, e.g. "Subtext: ___".`);
+  out.push("");
+  out.push("BEAT ORDER (which part moved first in each reaction)");
+  if (A.clusters.length) A.clusters.forEach((c,i) => {
+    const seen = []; for (const e of c.ev) if (!seen.find(s => s.k === e.region)) seen.push({ k:e.region, t:e.start });
+    const t0 = seen[0].t, spread = seen[seen.length-1].t - t0;
+    out.push(`Reaction ${i+1} at ${fmt(c.start)}s: ${seen.map((s,j) => `${RNAME[s.k]}${j ? ` +${Math.round(s.t - t0)}ms` : ""}`).join(" → ")}${seen.length > 1 && spread < 80 ? "   ⚠ fired together" : ""}`);
+  }); else out.push("No clear reactions detected.");
+  out.push("");
+  out.push("HANDS");
+  const hands = A.ev.filter(e => e.kind === "hand");
+  out.push(hands.length ? hands.map(h => `${fmt(h.start)}–${fmt(h.end)}s: ${h.text}${h.contact ? `  →  ${REGION_MEANING[regionKind(h.where)]}` : h.shape === "fist" ? "  →  contained anger or resolve" : ""}`).join("\n") : "No hand gestures.");
+  out.push("");
+  const mins = tk.dur/60000;
+  out.push(`BLINKS: ${A.blinks.length}${mins > 0.1 ? ` · ${Math.round(A.blinks.length/mins)} per minute (relaxed people blink about 15–20 per minute)` : ""}`);
+  return out.join("\n");
+}
+function buildLens(tk){
+  const A = tk.analysis, X = texture(tk), out = [];
+  const runs = A.emoRuns.filter(r => r.n !== "Neutral");
+  out.push("THEORY LENSES · the same take read through each researcher’s framework");
+  out.push("");
+  out.push("PAUL EKMAN · FACS, EMFACS, blends, micro-expressions");
+  out.push(runs.length ? "Prototypes: " + runs.map(r => `${r.n} (${EMO.find(e => e.n === r.n).aus}) ${fmt(r.start)}–${fmt(r.end)}s`).join(" · ") : "No full prototype reached.");
+  out.push(A.blendRuns.length ? "Blends and masks: " + A.blendRuns.map(b => `${BLENDS[b.n].label} (${BLENDS[b.n].read}) ${fmt(b.start)}s`).join(" · ") : "No blends: one feeling at a time.");
+  out.push(A.micro.length ? "Micro-expressions: " + A.micro.slice(0,8).map(m => `AU${m.au.c} ${m.au.n} at ${fmt(m.start)}s (${Math.round(m.end - m.start)}ms)`).join(" · ") : "No micro-expressions.");
+  out.push("");
+  out.push("GUILLAUME DUCHENNE · a genuine smile needs the eyes (orbicularis oculi, AU6)");
+  const sm = A.ev.filter(e => e.kind === "au" && e.au.c === 12 && e.peak >= 0.2);
+  if (sm.length) sm.forEach(s => { const d = A.ev.some(e => e.kind === "au" && e.au.c === 6 && e.start < s.end && e.end > s.start && e.peak >= s.peak*0.35); out.push(`${fmt(s.start)}s smile: ${d ? "Duchenne (eyes engaged)" : "non-Duchenne (mouth only)"}`); });
+  else out.push("No smiles.");
+  out.push("");
+  out.push("SILVAN TOMKINS · affects amplify; the face is where affect shows first");
+  out.push(runs.length ? "Affect sequence: " + runs.map(r => TOMKINS[r.n]).join(" → ") : "No affect amplified above neutral.");
+  if (A.blendRuns.some(b => b.n === "shame" || b.n === "embarrassed")) out.push("Shame–humiliation appears: head and eyes drop, the face hides.");
+  out.push("");
+  out.push("CARROLL IZARD · differential emotions; discrete emotions co-occur in patterns");
+  const pairs = new Map();
+  for (const p of A.per){ const on = Object.keys(p.e).filter(k => k !== "Neutral" && p.e[k] >= 0.2); for (let i = 0; i < on.length; i++) for (let j = i+1; j < on.length; j++){ const k = [on[i],on[j]].sort().join(" + "); pairs.set(k, (pairs.get(k)||0) + 1); } }
+  const pl = [...pairs.entries()].filter(([,n]) => n >= 6).sort((a,b) => b[1]-a[1]);
+  out.push(pl.length ? "Co-occurring emotions: " + pl.slice(0,5).map(([k,n]) => `${k} (${fmt(n*tk.dur/A.per.length)}s)`).join(" · ") : "No co-occurring emotions; each appears alone.");
+  out.push("");
+  out.push("JAMES RUSSELL · core affect on two axes, valence × arousal");
+  const q = p => `${p.val > 0.1 ? "pleasant" : p.val < -0.1 ? "unpleasant" : "neutral"}, ${p.aro > 0.1 ? "activated" : p.aro < -0.1 ? "calm" : "mid-arousal"}`;
+  const st = A.per[0], en = A.per[A.per.length-1];
+  const pk = A.per.reduce((m,p) => Math.hypot(p.val,p.aro) > Math.hypot(m.val,m.aro) ? p : m, A.per[0]);
+  out.push(`Starts ${q(st)} → furthest point at ${fmt(pk.t)}s (${q(pk)}; valence ${pk.val.toFixed(2)}, arousal ${pk.aro.toFixed(2)}) → ends ${q(en)}.`);
+  out.push(`Range covered: valence ${X.vRange.toFixed(2)}, arousal ${X.aRange.toFixed(2)} (scale −1 to 1).`);
+  out.push("");
+  out.push("CHARLES DARWIN · expressions as serviceable habits; the grief muscles; self-touch");
+  const grief = A.blendRuns.filter(b => ["tears","miserable","laughcry"].includes(b.n));
+  out.push(grief.length ? `Grief muscles engaged (inner brows lifted and pinched): ${grief.map(g => fmt(g.start) + "s").join(", ")}.` : "Grief muscles not engaged.");
+  const hands = A.ev.filter(e => e.kind === "hand" && e.contact);
+  out.push(hands.length ? `Self-touch: ${hands.map(h => `${rtext(REGION_NAME, h.where)} (${h.motion})`).join(", ")}.` : "No hand-to-face gestures.");
+  return out.join("\n");
+}
+function buildFacs(tk){
+  const A = tk.analysis, out = [];
+  out.push(`FACS TIMELINE · Take ${tk.id} · ${fmt(tk.dur)}s · intensity A (trace) B (slight) C (marked) D (severe) E (max)`);
+  out.push("");
+  for (const e of A.ev){
+    const t = `${fmt(e.start).padStart(5)}–${fmt(e.end).padEnd(5)}s`;
+    if (e.kind === "au") out.push(`${t}  AU${String(e.au.c).padEnd(3)} ${e.au.n.padEnd(21)} ${e.L} @${fmt(e.apex)}s  ${e.side}${e.end - e.start <= 500 ? "  micro" : ""}`);
+    else if (e.kind === "gaze") out.push(`${t}  Gaze   eyes ${e.dir}${e.far ? " (far)" : ""}`);
+    else if (e.kind === "hand") out.push(`${t}  Hand   ${e.text}`);
+    else out.push(`${t}  Head   ${e.text}`);
+  }
+  for (const b of A.blinks) out.push(`${fmt(b.t).padStart(5)}s        AU${b.dur > 300 ? "43 Eyes closed (slow)" : "45 Blink"} ${Math.round(b.dur)}ms`);
+  out.push("");
+  out.push("EMFACS + BLENDS");
+  for (const r of A.emoRuns.filter(r => r.n !== "Neutral")) out.push(`${fmt(r.start)}–${fmt(r.end)}s  ${r.n} (${EMO.find(e => e.n === r.n).aus})`);
+  for (const b of A.blendRuns) out.push(`${fmt(b.start)}–${fmt(b.end)}s  Blend: ${BLENDS[b.n].label}`);
+  return out.join("\n");
+}
+
+let tab = "prompt";
+function renderOutput(){
+  const tk = takes[curTake]; if (!tk) return;
+  $("opts").style.visibility = tab === "prompt" ? "visible" : "hidden";
+  $("out").value = tab === "prompt" ? buildPrompt(tk, $("detailFull").checked, $("talking").checked) : tab === "notes" ? buildNotes(tk) : tab === "lens" ? buildLens(tk) : buildFacs(tk);
+}
+["prompt","notes","lens","facs"].forEach(t => $("tab-"+t).onclick = () => { tab = t; ["prompt","notes","lens","facs"].forEach(x => $("tab-"+x).setAttribute("aria-selected", x === t)); renderOutput(); });
+["detailConcise","detailFull","talking"].forEach(id => $(id).onchange = renderOutput);
+function toast(msg){ $("toast").textContent = msg; clearTimeout(toast.t); toast.t = setTimeout(() => $("toast").textContent = "", 4000); }
+$("copyBtn").onclick = async () => { try { await navigator.clipboard.writeText($("out").value); toast("Copied"); } catch { $("out").select(); toast("Press Ctrl+C to copy"); } };
+function download(name, blob){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+$("saveVid").onclick = () => { const tk = takes[curTake]; if (tk) download(tk.name || `face-read-take-${tk.id}.webm`, tk.blob); };
+$("saveJson").onclick = () => {
+  const tk = takes[curTake]; if (!tk) return;
+  const data = { take: tk.id, durationMs: tk.dur, sensitivity: sens, actionUnits: AU.map(a => `AU${a.c} ${a.n}`),
+    frames: tk.frames.map(f => { const L = layers(f); return { t:Math.round(f.t), au: AU.map(a => [+auL(f,a.c).toFixed(3), +auR(f,a.c).toFixed(3)]), blink:+f.blink.toFixed(3), gaze:[+f.gx.toFixed(3), +f.gy.toFixed(3)], head:{ yaw:+f.yaw.toFixed(3), pitch:+f.pitch.toFixed(3), roll:+f.roll.toFixed(2) }, hands: f.hf.map(h => ({ side:h.side, region:h.region, shape:h.shape })), surface:L.surface, under:L.under, blend:L.blend, valence:+L.val.toFixed(3), arousal:+L.aro.toFixed(3) }; }),
+    prompt: buildPrompt(tk, false, $("talking").checked), notes: buildNotes(tk) };
+  download(`face-read-take-${tk.id}.json`, new Blob([JSON.stringify(data)], { type:"application/json" }));
+};
+
+/* =====================================================================
+   Live loop
+   ===================================================================== */
+let frames = 0, fpsT = performance.now(), liveTrail = [];
+function loop(){
+  if (mode !== "live") return;
+  const now = performance.now();
+  if (video.readyState >= 2 && video.currentTime !== lastVideoTime && video.videoWidth){
+    lastVideoTime = video.currentTime;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const d = detect(video); frames++;
+    if (d){
+      firstFaceAt ??= now;
+      if (!smoothBS) smoothBS = new Float32Array(d.cats.length).fill(-1);
+      smoothInto(smoothBS, d.cats, 0.5);
+      const raw = { t: recorder ? now - recStart : now, bs: Float32Array.from(smoothBS), lm: d.lm, hands: d.hands };
+      if (capturing){ capturing.push({ bs: Float32Array.from(d.cats.map(c => c.score)), lm: d.lm }); if (capturing.length >= 30){ baseline = makeBaseline(capturing, vw, vh); capturing = null; $("neutralState").textContent = "set"; $("neutralBtn").textContent = "Reset neutral"; } }
+      const f = derive(raw, baseline, vw, vh);
+      if (recFrames) recFrames.push(f);
+      if (!recorder) setTag("live", capturing ? "Hold still: reading neutral" : "Tracking");
+      const L = renderFrame(f, liveTrail);
+      liveTrail.push({ val:L.val, aro:L.aro }); if (liveTrail.length > 90) liveTrail.shift();
+      drawMesh(f.lm, f.hands, vw, vh);
+      const r = regions(f);
+      liveStrip.push({ t:now, r }); updateBeat(now, r); trackBlink(now, f.blink);
+    } else { drawMesh(null); if (!recorder){ setTag("", "No face in frame"); $("dominant").textContent = "—"; $("conf").textContent = "No face in frame"; } }
+  }
+  while (liveStrip.length && now - liveStrip[0].t > 8000) liveStrip.shift();
+  while (liveOnsets.length && now - liveOnsets[0].t > 8000) liveOnsets.shift();
+  drawStrip(liveStrip, now - 8000, now, null, liveOnsets);
+  if (now - fpsT > 1000){ $("fps").textContent = `${frames} fps`; frames = 0; fpsT = now; }
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   Models, camera, phone link
+   ===================================================================== */
+const FACE_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const HAND_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
+let fileset = null;
+async function makeTask(Task, url, buf, extra){
+  const base = buf ? { modelAssetBuffer: buf } : { modelAssetPath: url };
+  const o = d => ({ baseOptions:{ ...base, delegate:d }, runningMode:"VIDEO", ...extra });
+  try { return await Task.createFromOptions(fileset, o("GPU")); } catch { return await Task.createFromOptions(fileset, o("CPU")); }
+}
+async function ensureModels(){
+  if (faceLM) return true;
+  const ov = $("overlay"); ov.hidden = false; ov.innerHTML = '<div><strong>Loading face and hand models…</strong>First run downloads about 12 MB.</div>';
+  try { fileset ??= await FilesetResolver.forVisionTasks(WASM_URL); } catch { showModelHelp("engine"); return false; }
+  try { faceLM = await makeTask(FaceLandmarker, FACE_URL, faceModelBuf, { numFaces:1, outputFaceBlendshapes:true }); }
+  catch { faceModelBuf = null; showModelHelp("face"); return false; }
+  try { handLM = await makeTask(HandLandmarker, HAND_URL, handModelBuf, { numHands:2 }); handsOk = true; }
+  catch { handLM = null; handsOk = false; handModelBuf = null; }
+  $("handState").textContent = handsOk ? "on" : "off";
+  if (!handsOk) toast("Hand tracking couldn’t load, so only the face is read. Reload to try again.");
+  return true;
+}
+function showModelHelp(stage){
+  const ov = $("overlay"); ov.hidden = false;
+  const where = inPreview ? '<p style="margin:10px 0 0">This opened inside a preview panel, which blocks downloads and the camera. <b style="color:var(--fg)">Open the file in Chrome</b> instead.</p>' : '';
+  ov.innerHTML = stage === "engine"
+    ? `<div><strong>Couldn’t load the tracking engine</strong>It downloads from cdn.jsdelivr.net. Check that you’re online and no VPN or blocker is stopping it.${where}</div>`
+    : `<div style="max-width:480px"><strong>Couldn’t download the models</strong>Load them by hand:
+      <ol style="text-align:left;margin:10px 0 0;padding-left:20px">
+        <li>Download the <a href="${FACE_URL}" target="_blank" rel="noopener" style="color:var(--ember)">face model</a> and the <a href="${HAND_URL}" target="_blank" rel="noopener" style="color:var(--ember)">hand model</a>.</li>
+        <li>Pick both .task files here: <input id="modelFiles" type="file" accept=".task" multiple style="margin-top:6px"></li>
+      </ol>${where}</div>`;
+  const inp = document.getElementById("modelFiles");
+  if (inp) inp.onchange = async () => {
+    for (const f of inp.files){ const b = new Uint8Array(await f.arrayBuffer()); if (/hand/i.test(f.name)) handModelBuf = b; else faceModelBuf = b; }
+    faceLM = null; handLM = null; $("startBtn").click();
+  };
+}
+function stopCamera(keepOverlay){
+  stopRecording(); goLive();
+  camOn = false; mode = "off";
+  video.srcObject?.getTracks().forEach(t => t.stop()); video.srcObject = null;
+  $("startBtn").textContent = "Start camera"; setTag("","Camera off"); $("recBtn").disabled = true; $("neutralBtn").disabled = true;
+  drawMesh(null);
+  if (!keepOverlay){ const ov = $("overlay"); ov.hidden = false; ov.innerHTML = '<div><strong>Camera stopped</strong>Click “Start camera” to resume.</div>'; }
+}
+async function useStream(stream, src){
+  if (mode === "replay") goLive();
+  video.srcObject = stream; source = src;
+  $("srcTag").textContent = src === "phone" ? "Phone camera" : "Laptop camera";
+  try { await video.play(); } catch {}
+  $("overlay").hidden = true; camOn = true; mode = "live"; lastVideoTime = -1; smoothBS = null;
+  $("startBtn").textContent = "Stop camera";
+  ["neutralBtn","recBtn"].forEach(id => $(id).disabled = false);
+  if (!baseline || src === "phone") setTimeout(() => { if (camOn) startNeutral(); }, 1500);
+  requestAnimationFrame(loop);
+}
+$("startBtn").onclick = async () => {
+  if (camOn){ stopCamera(); return; }
+  const btn = $("startBtn"); btn.disabled = true;
+  try {
+    if (!(await ensureModels())) return;
+    const ov = $("overlay"); ov.innerHTML = '<div><strong>Waiting for camera…</strong>Allow access in the browser prompt.</div>';
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ ideal:1280 }, height:{ ideal:720 }, frameRate:{ ideal:60 }, facingMode:"user" }, audio:false }); }
+    catch (err){
+      const denied = err && (err.name === "NotAllowedError" || err.name === "SecurityError"), busy = err && (err.name === "NotReadableError" || err.name === "TrackStartError");
+      ov.innerHTML = denied ? `<div><strong>Camera blocked</strong>${inPreview ? "Preview panels can’t use the camera. Open the file in Chrome." : "Click the camera icon in Chrome’s address bar, choose Allow, then click Start camera again."}</div>`
+        : busy ? '<div><strong>Camera is busy</strong>Another app (Zoom, OBS, Teams) is using it. Close that app and try again.</div>'
+        : `<div><strong>No camera found</strong>${(err && err.message) || err}</div>`;
+      return;
+    }
+    await useStream(stream, "laptop");
+  } finally { btn.disabled = false; }
+};
+function startNeutral(){ if (mode === "replay") goLive(); capturing = []; $("neutralState").textContent = "reading…"; }
+$("neutralBtn").onclick = startNeutral;
+$("meshBtn").onclick = () => { showMesh = !showMesh; $("meshBtn").textContent = `Mesh: ${showMesh ? "on" : "off"}`; };
+$("recBtn").onclick = () => recorder ? stopRecording() : startRecording();
+$("sens").oninput = () => { sens = +$("sens").value; $("sensVal").textContent = sens.toFixed(2) + "×"; const tk = takes[curTake]; if (tk){ tk.analysis = analyze(tk); tk.strip = null; tk.trail = null; renderOutput(); } };
+
+/* ---------- phone link (laptop side) ---------- */
+let peer = null, phoneConn = null;
+function sendPhone(msg){ try { phoneConn?.open && phoneConn.send(msg); } catch {} }
+function hostedBase(){ return location.protocol === "https:" ? location.origin + location.pathname : (store.get("faceReadHost") || ""); }
+function phoneStatus(t, cls=""){ $("phoneStatus").textContent = t; $("phoneStatus").className = "status " + cls; }
+function renderQR(url){
+  if (typeof qrcode !== "function"){ $("qr").innerHTML = '<span class="note" style="color:#555">QR library didn’t load</span>'; return; }
+  const q = qrcode(0, "M"); q.addData(url); q.make(); $("qr").innerHTML = q.createSvgTag({ cellSize:4, margin:2, scalable:true });
+}
+async function openPhonePanel(){
+  $("phonePanel").hidden = false;
+  $("hostBox").hidden = location.protocol === "https:";
+  const base = hostedBase();
+  if (!base){ $("qr").innerHTML = '<span class="note" style="color:#555;text-align:center">Add the https address first</span>'; phoneStatus("The phone needs the app at an https address to use its camera.", "err"); return; }
+  if (!window.Peer){ phoneStatus("Couldn’t load the connection library. Check your internet.", "err"); return; }
+  if (!(await ensureModels())) return;
+  if (!camOn){ $("overlay").hidden = false; $("overlay").innerHTML = '<div><strong>Waiting for your phone…</strong>Scan the QR code below.</div>'; }
+  if (peer && !peer.destroyed && peer.id){ renderQR(`${base}?link=${peer.id}`); return; }
+  phoneStatus("Creating a link…");
+  peer = new Peer();
+  peer.on("open", id => { renderQR(`${base}?link=${id}`); phoneStatus("Scan with your phone. Waiting for it to connect…"); });
+  peer.on("call", call => {
+    call.answer();
+    call.on("stream", s => { if (camOn && source === "laptop") stopCamera(true); useStream(s, "phone"); phoneStatus("Phone connected. Reading its camera.", "ok"); });
+    call.on("close", () => { if (source === "phone"){ stopCamera(); phoneStatus("Phone disconnected.", "err"); } });
+  });
+  peer.on("connection", c => { phoneConn = c; c.on("data", d => { if (d?.cmd === "rec") (recorder ? stopRecording() : startRecording()); }); c.on("open", () => sendPhone({ rec: !!recorder })); });
+  peer.on("error", e => phoneStatus("Link problem: " + (e.message || e.type), "err"));
+}
+$("phoneBtn").onclick = openPhonePanel;
+$("phoneClose").onclick = () => { $("phonePanel").hidden = true; };
+$("hostUrl").value = store.get("faceReadHost") || "";
+$("hostSave").onclick = () => {
+  let u = $("hostUrl").value.trim();
+  if (!/^https:\/\//.test(u)){ phoneStatus("The address must start with https://", "err"); return; }
+  u = u.split("?")[0]; store.set("faceReadHost", u); openPhonePanel();
+};
+
+/* ---------- keyboard ---------- */
+document.addEventListener("keydown", e => {
+  if (LINK) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "textarea" || (tag === "input" && !["range","radio","checkbox"].includes(e.target.type))) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "r" || e.key === "R"){ e.preventDefault(); if (camOn) (recorder ? stopRecording() : startRecording()); }
+  else if (e.key === " "){ e.preventDefault(); togglePlay(); }
+  else if (e.key === "Escape") goLive();
+  else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && mode === "replay"){ e.preventDefault(); replay.pause(); playing = false; $("playBtn").textContent = "Play"; replay.currentTime = Math.max(0, replay.currentTime + (e.key === "ArrowLeft" ? -1 : 1)/30); }
+});
+</script>
+</body>
+</html>
